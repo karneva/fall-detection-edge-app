@@ -422,12 +422,11 @@ LiveMode
 
 ## 함께 보면 좋은 문서
 
+- [docs/README.md](docs/README.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [docs/FALL_DETECTION_CORE.md](docs/FALL_DETECTION_CORE.md)
+- [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - [docs/TUNING_GUIDE.md](docs/TUNING_GUIDE.md)
-- [docs/AUTOMATIC_MODE_GUIDE.md](docs/AUTOMATIC_MODE_GUIDE.md)
-- [docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md)
-
-다만 일부 문서는 실험 로그나 변경 이력이 섞여 있을 수 있으므로, 가장 신뢰할 기준은 현재 코드입니다.
 
 ## 한계와 참고 사항
 
