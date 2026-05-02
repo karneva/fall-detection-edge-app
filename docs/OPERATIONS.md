@@ -7,6 +7,10 @@
 기본 실행 방식:
 
 ```bash
+cp .env.example .env
+```
+
+```bash
 docker-compose up -d --build
 ```
 
@@ -19,6 +23,11 @@ docker-compose up -d --build
 - Python 패키지: `requirements.txt`
 - PyTorch/CUDA: Jetson 베이스 이미지에서 제공
 - QR 인식용 시스템 라이브러리: `libzbar0`
+
+환경값 주입 기준:
+
+- `docker-compose.yml`은 `.env` 또는 셸 환경변수를 읽어 앱 설정값을 전달합니다.
+- 공개 저장소에서는 `.env.example`을 템플릿으로 사용하면 됩니다.
 
 ## 시작 시 동작
 

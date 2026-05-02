@@ -222,6 +222,12 @@ AI 분류기가 `ADL`로 판정하면 규칙 기반 탐지를 억제하고 `ai_s
 
 ### 1. Docker Compose 실행
 
+실행 전에 환경 예시 파일을 기준으로 `.env`를 준비하는 것을 권장합니다.
+
+```bash
+cp .env.example .env
+```
+
 ```bash
 docker-compose up -d --build
 ```
@@ -233,6 +239,7 @@ docker-compose up -d --build
 - 카메라 디바이스: `/dev/video0`
 - `runs/` 디렉터리 호스트-컨테이너 마운트
 - NVIDIA 런타임 사용
+- `.env` 또는 셸 환경변수로 앱 설정 주입 가능
 
 ### 2. 서버 상태 확인
 

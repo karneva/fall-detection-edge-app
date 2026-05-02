@@ -10,16 +10,37 @@ services:
     # (1) Jetson에서 GPU 사용
     runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-all}
 
-      # 앱 설정값(필요한 것만)
-      - CAM_INDEX=0
-      - DEFAULT_CONF=0.50
-      - DETERMINISTIC=1
-      - USE_HALF=0
-      - RUNS_DIR=/app/runs
-      - CLIP_DIR=/app/runs/clips
+      # 앱 설정값
+      - CAM_INDEX=${CAM_INDEX:-0}
+      - CAM_DEVICE=${CAM_DEVICE:-}
+      - FRAME_W=${FRAME_W:-1920}
+      - FRAME_H=${FRAME_H:-1080}
+      - JPEG_QUALITY=${JPEG_QUALITY:-80}
+      - MODEL_PATH=${MODEL_PATH:-yolov8s-pose.pt}
+      - DEFAULT_CONF=${DEFAULT_CONF:-0.50}
+      - DETERMINISTIC=${DETERMINISTIC:-1}
+      - USE_HALF=${USE_HALF:-0}
+      - DEVICE_ID=${DEVICE_ID:-EEUM-J105}
+      - DEVICE_NAME=${DEVICE_NAME:-Jetson-Orin-Nano}
+      - LOCATION_ID=${LOCATION_ID:-LivingRoom}
+      - SERVER_URL=${SERVER_URL:-https://your-backend.example.com}
+      - WS_SERVER_URL=${WS_SERVER_URL:-}
+      - RPI_URL=${RPI_URL:-http://10.10.0.1:8080/eeum}
+      - RUNS_DIR=${RUNS_DIR:-/app/runs}
+      - CLIP_DIR=${CLIP_DIR:-/app/runs/clips}
+      - CLIP_FPS=${CLIP_FPS:-24}
+      - CLIP_RESIZE_WIDTH=${CLIP_RESIZE_WIDTH:-640}
+      - CLIP_RESIZE_HEIGHT=${CLIP_RESIZE_HEIGHT:-480}
+      - CLIP_PRE_SEC=${CLIP_PRE_SEC:-6}
+      - CLIP_POST_SEC=${CLIP_POST_SEC:-6}
+      - CLIP_COOLDOWN_S=${CLIP_COOLDOWN_S:-30.0}
+      - ABNORMAL_TIMEOUT_S=${ABNORMAL_TIMEOUT_S:-10.0}
+      - KP_EMA_ENABLE=${KP_EMA_ENABLE:-1}
+      - KP_EMA_ALPHA=${KP_EMA_ALPHA:-0.5}
+      - KP_MIN_CONF=${KP_MIN_CONF:-0.30}
 
     # (2) 카메라 디바이스 전달
     devices:
