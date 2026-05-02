@@ -4,6 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import os
+from pathlib import Path
 from .model import Fall1DCNN
 
 # 설정
@@ -21,21 +22,54 @@ def load_data(phase):
     y = np.load(os.path.join(DATA_PATH, f"y_{phase}.npy"))
     return X, y
 
+
+def load_active_learning_arrays(active_dir: str):
+    """
+    active_learning 디렉터리 아래의 X_*.npy / y_*.npy 쌍을 모두 찾아 병합합니다.
+    예:
+      X_not_fall.npy + y_not_fall.npy
+      X_custom_adl.npy + y_custom_adl.npy
+    """
+    active_root = Path(active_dir)
+    if not active_root.exists():
+        return None, None
+
+    x_parts = []
+    y_parts = []
+
+    for x_path in sorted(active_root.glob("X_*.npy")):
+        suffix = x_path.name[2:]
+        y_path = active_root / f"y_{suffix}"
+        if not y_path.exists():
+            print(f"Skipping {x_path.name}: matching {y_path.name} not found")
+            continue
+
+        x_arr = np.load(x_path)
+        y_arr = np.load(y_path)
+
+        if len(x_arr) != len(y_arr):
+            print(f"Skipping {x_path.name}: X/Y length mismatch ({len(x_arr)} != {len(y_arr)})")
+            continue
+
+        print(f"Loaded active set: {x_path.name} ({len(x_arr)} samples)")
+        x_parts.append(x_arr)
+        y_parts.append(y_arr)
+
+    if not x_parts:
+        return None, None
+
+    return np.concatenate(x_parts, axis=0), np.concatenate(y_parts, axis=0)
+
 def train_active():
     # 1. 기초 데이터 로드
     X_train, y_train = load_data("train")
     X_val, y_val = load_data("val")
     
     # 2. 로컬 수집 데이터(Active Learning) 로드 및 병합
-    active_x_path = os.path.join(ACTIVE_DATA_PATH, "X_not_fall.npy")
-    active_y_path = os.path.join(ACTIVE_DATA_PATH, "y_not_fall.npy")
-    
-    if os.path.exists(active_x_path):
-        X_active = np.load(active_x_path)
-        y_active = np.load(active_y_path)
-        
+    X_active, y_active = load_active_learning_arrays(ACTIVE_DATA_PATH)
+    if X_active is not None and y_active is not None:
         print(f"Merging Active Learning Data: {len(X_active)} samples")
-        
+
         # Train 데이터에 병합
         X_train = np.concatenate([X_train, X_active], axis=0)
         y_train = np.concatenate([y_train, y_active], axis=0)

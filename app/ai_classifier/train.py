@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import os
-from model import Fall1DCNN
+from .model import Fall1DCNN
 
 # 설정
 DATA_PATH = "app/ai_classifier/data"

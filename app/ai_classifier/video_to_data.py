@@ -5,6 +5,7 @@ import torch
 from ultralytics import YOLO
 from tqdm import tqdm
 import glob
+import argparse
 
 # 설정
 MODEL_PATH = "yolov8s-pose.pt"
@@ -63,8 +64,8 @@ def process_video(model, video_path):
         
     return samples
 
-def collect_from_folder(folder_path, label):
-    model = YOLO(MODEL_PATH)
+def collect_from_folder(folder_path, label, model_path=MODEL_PATH):
+    model = YOLO(model_path)
     video_files = glob.glob(os.path.join(folder_path, "*.mp4"))
     
     X_list = []
@@ -79,22 +80,30 @@ def collect_from_folder(folder_path, label):
             
     return np.array(X_list, dtype=np.float32), np.array(y_list, dtype=np.int64)
 
+
+def save_samples(X, y, save_dir, prefix):
+    os.makedirs(save_dir, exist_ok=True)
+    np.save(os.path.join(save_dir, f"X_{prefix}.npy"), X)
+    np.save(os.path.join(save_dir, f"y_{prefix}.npy"), y)
+    print(f"Saved {len(X)} samples to {save_dir} with prefix '{prefix}'")
+
 if __name__ == "__main__":
-    # 예시: not_fall 폴더에서 ADL(0) 데이터 추출
-    NOT_FALL_DIR = "runs/clips/not_fall"
-    if os.path.exists(NOT_FALL_DIR):
-        X_new, y_new = collect_from_folder(NOT_FALL_DIR, label=0)
-        
+    parser = argparse.ArgumentParser(description="Extract pose sequences from videos into NumPy arrays")
+    parser.add_argument("--input-dir", default="runs/clips/not_fall", help="Folder containing source videos")
+    parser.add_argument("--label", type=int, default=0, help="Class label: 0=ADL, 1=Fall")
+    parser.add_argument("--prefix", default="not_fall", help="Output file prefix, e.g. not_fall or custom_fall")
+    parser.add_argument("--save-dir", default="app/ai_classifier/data/active_learning", help="Directory to save .npy arrays")
+    parser.add_argument("--model-path", default=MODEL_PATH, help="YOLO pose model path")
+    args = parser.parse_args()
+
+    if os.path.exists(args.input_dir):
+        X_new, y_new = collect_from_folder(args.input_dir, label=args.label, model_path=args.model_path)
+
         if len(X_new) > 0:
             # (N, 30, 34) -> (N, 34, 30)
             X_new = np.transpose(X_new, (0, 2, 1))
-            
-            save_dir = "app/ai_classifier/data/active_learning"
-            os.makedirs(save_dir, exist_ok=True)
-            np.save(os.path.join(save_dir, "X_not_fall.npy"), X_new)
-            np.save(os.path.join(save_dir, "y_not_fall.npy"), y_new)
-            print(f"Extracted {len(X_new)} samples to {save_dir}")
+            save_samples(X_new, y_new, args.save_dir, args.prefix)
         else:
             print("No valid samples found in video files.")
     else:
-        print(f"Directory not found: {NOT_FALL_DIR}")
+        print(f"Directory not found: {args.input_dir}")
