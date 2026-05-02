@@ -14,6 +14,12 @@ docker-compose up -d --build
 
 - `8000`
 
+의존성 기준:
+
+- Python 패키지: `requirements.txt`
+- PyTorch/CUDA: Jetson 베이스 이미지에서 제공
+- QR 인식용 시스템 라이브러리: `libzbar0`
+
 ## 시작 시 동작
 
 애플리케이션 시작 후 순서는 다음과 같습니다.

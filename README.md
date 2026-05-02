@@ -212,6 +212,12 @@ AI 분류기가 `ADL`로 판정하면 규칙 기반 탐지를 억제하고 `ai_s
 - WebSocket
 - Docker / Docker Compose
 
+### 의존성 참고
+
+- 이 저장소의 Python 패키지 의존성은 `requirements.txt`에 정리되어 있습니다.
+- Jetson용 Docker 이미지는 `dustynv/pytorch` 베이스를 사용하며, PyTorch/CUDA 스택은 베이스 이미지가 제공한다고 가정합니다.
+- QR 인식을 위해 컨테이너에는 `libzbar0` 시스템 라이브러리가 필요합니다.
+
 ## 빠른 시작
 
 ### 1. Docker Compose 실행

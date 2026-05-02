@@ -9,6 +9,7 @@ RUN apt-get update -o Acquire::Check-Valid-Until=false \
     python3-opencv \
     ffmpeg \
     v4l-utils \
+    libzbar0 \
     libglib2.0-0 \
     libgl1 \
     libxcb1 \
@@ -22,6 +23,7 @@ RUN apt-get update -o Acquire::Check-Valid-Until=false \
 WORKDIR /app
 
 # 4. 파이썬 의존성 설치
+# torch / torchvision / CUDA 관련 스택은 베이스 이미지가 제공한다고 가정
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     --extra-index-url https://pypi.org/simple

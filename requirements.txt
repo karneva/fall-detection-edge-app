@@ -1,6 +1,15 @@
-websocket-client
-requests
+# API
+fastapi
+uvicorn
+
+# Core runtime
 numpy
-opencv-python
+requests
+websocket-client
 ultralytics
+scipy
+pyzbar
+
+# Utilities / training scripts
+tqdm
 paho-mqtt

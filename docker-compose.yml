@@ -15,7 +15,7 @@ services:
 
       # 앱 설정값(필요한 것만)
       - CAM_INDEX=0
-      - DEFAULT_CONF=0.35
+      - DEFAULT_CONF=0.50
       - DETERMINISTIC=1
       - USE_HALF=0
       - RUNS_DIR=/app/runs
