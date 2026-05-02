@@ -3,16 +3,7 @@ import time
 import json
 import logging
 import websocket
-from ..config import WS_SERVER_URL, DEVICE_ID
-
-logger = logging.getLogger(__name__)
-
-import threading
-import time
-import json
-import logging
-import websocket
-from ..config import WS_SERVER_URL, DEVICE_ID
+from ..config import WS_SERVER_URL, DEVICE_ID, ENABLE_BACKEND_STREAM
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +25,9 @@ class WebSocketStreamer:
 
     def start(self):
         """스트리밍 스레드를 시작합니다."""
+        if not ENABLE_BACKEND_STREAM:
+            logger.info("[STREAMER] Backend streaming disabled. Skipping WebSocket streamer start.")
+            return
         if self.thread and self.thread.is_alive():
             return
         self.stop_event.clear()

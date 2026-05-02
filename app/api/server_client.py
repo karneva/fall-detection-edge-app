@@ -9,6 +9,13 @@ import logging
 from typing import Optional, Dict, Any, Tuple
 import os
 
+from ..config import (
+    ENABLE_BACKEND_STREAM,
+    ENABLE_DEVICE_PAIRING,
+    ENABLE_RPI_EVENTS,
+    ENABLE_SERVER_REPORTING,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +45,8 @@ class ServerClient:
         QR 코드를 통해 획득한 pairing_code를 기반으로 서버에 장치 등록을 요청합니다.
         성공 시 액세스 토큰 및 하위 장치 정보를 포함한 응답을 반환합니다.
         """
+        if not ENABLE_DEVICE_PAIRING:
+            return None
         try:
             url = f"{self.server_url}/api/iot/auth/pairing"
             # 마스터 장치(Jetson)와 함께 등록될 하위 장치 목록 구성
@@ -76,6 +85,8 @@ class ServerClient:
 
     def send_access_token_to_rpi(self, access_token: str) -> bool:
         """라즈베리파이에 인증 토큰을 전달하여 동기화합니다."""
+        if not ENABLE_RPI_EVENTS:
+            return False
         try:
             url = f"{self.rpi_url}/token"
             payload = {"token": access_token}
@@ -91,6 +102,8 @@ class ServerClient:
 
     def get_access_token(self, refresh_token: str) -> Optional[Dict[str, Any]]:
         """리프레시 토큰을 사용하여 새로운 액세스 토큰을 발급받습니다."""
+        if not ENABLE_SERVER_REPORTING:
+            return None
         try:
             url = f"{self.server_url}/api/iot/auth/refresh"
             payload = {
@@ -113,6 +126,8 @@ class ServerClient:
     
     def send_event_rpi(self, payload: Dict[str, Any]) -> bool:
         """낙상/입퇴실 이벤트를 라즈베리파이로 전송하여 알림 및 제어를 수행합니다."""
+        if not ENABLE_RPI_EVENTS:
+            return False
         try:
             url = f"{self.rpi_url}/event"
             resp = requests.post(url, json=payload, timeout=self.timeout)
@@ -128,6 +143,8 @@ class ServerClient:
         사고 발생 이벤트를 통합 백엔드 서버로 전송합니다.
         서버로부터 사고 영상 업로드를 위한 Presigned URL과 저장 경로를 응답받습니다.
         """
+        if not ENABLE_SERVER_REPORTING:
+            return None, None
         try:
             url = f"{self.server_url}/api/iot/device/falls/detection"
             headers = {"Authorization": f"Bearer {access_token}"}
@@ -162,6 +179,8 @@ class ServerClient:
 
     def send_video_upload_success(self, video_path: str, access_token: str) -> bool:
         """영상 업로드가 성공적으로 완료되었음을 서버에 알려 DB 처리를 완료시킵니다."""
+        if not ENABLE_SERVER_REPORTING:
+            return False
         try:
             url = f"{self.server_url}/api/iot/device/falls/upload-success"
             payload = {"videoPath": video_path}
@@ -178,6 +197,8 @@ class ServerClient:
     
     def ping(self) -> bool:
         """백엔드 서버와의 연결 상태를 점검합니다."""
+        if not ENABLE_SERVER_REPORTING:
+            return False
         try:
             url = f"{self.server_url}/health"
             resp = requests.get(url, timeout=self.timeout)
@@ -189,6 +210,8 @@ class ServerClient:
     
     def connect_websocket(self, device_id: str) -> bool:
         """분석 영상을 실시간으로 송출하기 위한 WebSocket 연결을 수립합니다."""
+        if not ENABLE_BACKEND_STREAM:
+            return False
         import websocket
         import json
         

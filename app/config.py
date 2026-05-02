@@ -1,5 +1,21 @@
 import os
 
+
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_placeholder_url(url: str) -> bool:
+    value = (url or "").strip().lower()
+    return (
+        not value
+        or "your-backend.example.com" in value
+        or "your-rpi-host" in value
+    )
+
 # ---------------------------------------------------------
 # 카메라 및 영상 품질 설정
 # ---------------------------------------------------------
@@ -37,6 +53,26 @@ SERVER_URL = os.getenv("SERVER_URL", "https://your-backend.example.com")
 WS_SERVER_URL = os.getenv("WS_SERVER_URL", SERVER_URL.replace("http", "ws") + "/api/ws/stream")
 # 하위 제어 장치(Raspberry Pi) 주소
 RPI_URL = os.getenv("RPI_URL", "http://your-rpi-host:8080/eeum")
+
+# ---------------------------------------------------------
+# 외부 연동 스위치
+# ---------------------------------------------------------
+ENABLE_BACKEND_STREAM = _env_flag(
+    "ENABLE_BACKEND_STREAM",
+    not _is_placeholder_url(WS_SERVER_URL),
+)
+ENABLE_SERVER_REPORTING = _env_flag(
+    "ENABLE_SERVER_REPORTING",
+    not _is_placeholder_url(SERVER_URL),
+)
+ENABLE_RPI_EVENTS = _env_flag(
+    "ENABLE_RPI_EVENTS",
+    not _is_placeholder_url(RPI_URL),
+)
+ENABLE_DEVICE_PAIRING = _env_flag(
+    "ENABLE_DEVICE_PAIRING",
+    not _is_placeholder_url(SERVER_URL),
+)
 
 # ---------------------------------------------------------
 # 로그 및 동영상 저장 저장소
