@@ -259,6 +259,15 @@ AI 분류기가 `ADL`로 판정하면 규칙 기반 탐지를 억제하고 `ai_s
 cp .env.example .env
 ```
 
+로컬 테스트에서 백엔드 서버/Raspberry Pi 없이 실행하려면 `.env`에서 아래 값을 `0`으로 두면 됩니다.
+
+```bash
+ENABLE_BACKEND_STREAM=0
+ENABLE_SERVER_REPORTING=0
+ENABLE_RPI_EVENTS=0
+ENABLE_DEVICE_PAIRING=0
+```
+
 ```bash
 docker-compose up -d --build
 ```
@@ -271,6 +280,22 @@ docker-compose up -d --build
 - `runs/` 디렉터리 호스트-컨테이너 마운트
 - NVIDIA 런타임 사용
 - `.env` 또는 셸 환경변수로 앱 설정 주입 가능
+
+### 2. 로컬 bash에서 직접 서버 실행
+
+Conda 환경 예시:
+
+```bash
+source /c/Users/SSAFY/miniforge3/etc/profile.d/conda.sh
+conda activate ai_env
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+실행 후 상태 확인:
+
+```bash
+curl http://localhost:8000/health
+```
 
 ### 2. 서버 상태 확인
 
