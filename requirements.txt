@@ -1,0 +1,6 @@
+websocket-client
+requests
+numpy
+opencv-python
+ultralytics
+paho-mqtt
