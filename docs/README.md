@@ -12,6 +12,8 @@
   실행 방법, API, 런타임 동작, 저장 파일, 운영 시 확인 포인트
 - `TUNING_GUIDE.md`
   현재 코드 기준 파라미터와 튜닝 방향
+- `EVALUATION_PROTOCOL.md`
+  모델 비교를 위한 고정 평가셋 규격과 운영 원칙
 - `RELEASE_CHECKLIST.md`
   GitHub 공개 전 최종 점검 항목
 
@@ -21,7 +23,8 @@
 2. `FALL_DETECTION_CORE.md`
 3. `OPERATIONS.md`
 4. `TUNING_GUIDE.md`
-5. `RELEASE_CHECKLIST.md`
+5. `EVALUATION_PROTOCOL.md`
+6. `RELEASE_CHECKLIST.md`
 
 ## 문서 원칙
 

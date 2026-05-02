@@ -452,6 +452,24 @@ LiveMode
 - WebSocket 프레임 릴레이
 - Observation JSONL 기록 및 리플레이
 
+## 데이터 재학습 워크플로우
+
+현재 저장소에는 `runs/clips/not_fall`에 쌓인 오탐 클립을 2차 분류기 재학습에 반영하기 위한 스크립트가 포함되어 있습니다.
+
+흐름:
+
+1. `runs/clips/not_fall/*.mp4`에서 키포인트 시퀀스 추출
+2. `app/ai_classifier/data/active_learning/X_*.npy`, `y_*.npy` 생성
+3. 기존 train/val 데이터와 병합하여 active-learning 재학습
+
+실행 예시:
+
+```bash
+python3 -m app.ai_classifier.retrain_from_runs
+```
+
+직접 촬영 데이터는 `dataset/custom/` 아래의 `train/`, `val/`, `eval_fixed/` 구조에 나눠 관리하는 것을 권장합니다.
+
 ## 저장소에 없는 항목
 
 공개 저장소를 가볍게 유지하기 위해 아래 항목은 기본적으로 포함하지 않습니다.
