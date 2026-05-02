@@ -1,20 +1,20 @@
-# YOLO results and metadata
+# Runtime outputs
 runs/
-*.pt
-*.ptl
-*.onnx
-
-# Python
-*.pyc
-*.pyo
-__pycache__/
 *.log
+*.jsonl
 
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
+# Device-local state
+device_state.json
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
 
 # Virtual environments
 venv/
@@ -22,18 +22,45 @@ venv/
 env/
 ENV/
 
-# Testing artifacts
-test_output/
-test_*.xml
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# Configuration
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment / local config
 .env
+.env.*
 *.db
 *.sqlite
 
-# Data (if not needed in Git)
+# Test artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+test_output/
+test_*.xml
+
+# Model artifacts
+*.pt
+*.ptl
+*.pth
+*.onnx
+*.engine
+*.trt
+
+# Training / experiment data
+app/ai_classifier/data/
+app/ai_classifier/weights/
 dataset/
 data/
 weights/
 
+# Local tooling
 .codex
