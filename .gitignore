@@ -1,0 +1,39 @@
+# YOLO results and metadata
+runs/
+*.pt
+*.ptl
+*.onnx
+
+# Python
+*.pyc
+*.pyo
+__pycache__/
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Testing artifacts
+test_output/
+test_*.xml
+
+# Configuration
+.env
+*.db
+*.sqlite
+
+# Data (if not needed in Git)
+dataset/
+data/
+weights/
+
+.codex

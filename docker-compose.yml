@@ -1,0 +1,39 @@
+services:
+  edge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jetson-edge
+    ports:
+      - "8000:8000"
+
+    # (1) Jetson에서 GPU 사용
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+
+      # 앱 설정값(필요한 것만)
+      - CAM_INDEX=0
+      - DEFAULT_CONF=0.35
+      - DETERMINISTIC=1
+      - USE_HALF=0
+      - RUNS_DIR=/app/runs
+      - CLIP_DIR=/app/runs/clips
+
+    # (2) 카메라 디바이스 전달
+    devices:
+      - "/dev/video0:/dev/video0"
+
+    # (3) runs 폴더 영속화(호스트에 파일 남기기)
+    volumes:
+      - ".:/app"
+      - "./runs:/app/runs"
+
+    # (4) 권한 문제 줄이기(선택)
+    # Jetson 환경마다 다르지만 /dev/video0 접근 때문에 필요할 수 있음
+    group_add:
+      - "video"
+
+    # (5) 재시작 정책(개발 중이면 off도 가능)
+    restart: unless-stopped
