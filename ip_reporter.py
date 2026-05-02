@@ -30,7 +30,7 @@ if state_file.exists():
         device_state = {}
 
 # 설정값 구성
-SERVER_URL = os.getenv("SERVER_URL", "https://i14a105.p.ssafy.io").rstrip("/")
+SERVER_URL = os.getenv("SERVER_URL", "https://your-backend.example.com").rstrip("/")
 DEVICE_ID = device_state.get("device_id") or os.getenv("IP_REPORTER_DEVICE_ID", "")
 TOKEN = device_state.get("access_token") or os.getenv("IP_REPORTER_TOKEN", "")
 FAMILIES_ID = device_state.get("group_id")

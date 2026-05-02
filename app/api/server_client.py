@@ -43,8 +43,14 @@ class ServerClient:
             # 마스터 장치(Jetson)와 함께 등록될 하위 장치 목록 구성
             child_devices = [
                 {"serial_number": device_id, "device_type": "JETSON"},
-                {"serial_number": "EEUM-R105", "device_type": "RPI"},
-                {"serial_number": "EEUM-E105-1", "device_type": "ESP32"}
+                {
+                    "serial_number": os.getenv("RPI_SERIAL_NUMBER", "RPI-EDGE-001"),
+                    "device_type": "RPI",
+                },
+                {
+                    "serial_number": os.getenv("ESP32_SERIAL_NUMBER", "ESP32-EDGE-001"),
+                    "device_type": "ESP32",
+                }
             ]
 
             payload = {
@@ -88,7 +94,7 @@ class ServerClient:
         try:
             url = f"{self.server_url}/api/iot/auth/refresh"
             payload = {
-                "serial_number": os.getenv("DEVICE_ID", "EEUM-J105"),
+                "serial_number": os.getenv("DEVICE_ID", "JETSON-EDGE-001"),
                 "refresh_Token": refresh_token
             }
             resp = requests.post(url, json=payload, timeout=self.timeout)

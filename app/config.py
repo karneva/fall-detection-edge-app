@@ -27,16 +27,16 @@ MODEL_PATH = os.getenv("MODEL_PATH", "yolov8s-pose.pt")
 # 장치 식별 및 네트워크 설정
 # ---------------------------------------------------------
 # 장치 시리얼 번호 및 이름
-DEVICE_ID = os.getenv("DEVICE_ID", "EEUM-J105")
+DEVICE_ID = os.getenv("DEVICE_ID", "JETSON-EDGE-001")
 DEVICE_NAME = os.getenv("DEVICE_NAME", "Jetson-Orin-Nano")
 # 설치 장소 에칭
-LOCATION_ID = os.getenv("LOCATION_ID", "LivingRoom")
+LOCATION_ID = os.getenv("LOCATION_ID", "default-location")
 # 통합 백엔드 API 서버 URL
-SERVER_URL = os.getenv("SERVER_URL", "https://i14a105.p.ssafy.io")
+SERVER_URL = os.getenv("SERVER_URL", "https://your-backend.example.com")
 # 실시간 영상 전송용 WebSocket 서버 URL
 WS_SERVER_URL = os.getenv("WS_SERVER_URL", SERVER_URL.replace("http", "ws") + "/api/ws/stream")
 # 하위 제어 장치(Raspberry Pi) 주소
-RPI_URL = os.getenv("RPI_URL", "http://10.10.0.1:8080/eeum")
+RPI_URL = os.getenv("RPI_URL", "http://your-rpi-host:8080/eeum")
 
 # ---------------------------------------------------------
 # 로그 및 동영상 저장 저장소

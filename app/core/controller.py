@@ -14,19 +14,6 @@ from ..utils import start_replay_thread
 
 logger = logging.getLogger(__name__)
 
-# 임시 테스트 등록 (Windows)
-def _register_temp_for_windows():
-    device_state = get_device_state()
-    if sys.platform == "win32" and not device_state.is_registered():
-        logger.info("[TEST] Windows environment - Creating temporary registration")
-        device_state.register(
-            device_id="TEST_DEVICE_001",
-            access_token="test_access_token_xxx",
-            refresh_token="test_refresh_token_xxx",
-            group_id=1,
-            serial_number="TEST-001"
-        )
-
 class AppController:
     """
     애플리케이션의 메인 컨트롤러 클래스입니다.
@@ -77,8 +64,6 @@ class AppController:
         self.record_lock = threading.Lock()
         self.record_fp = None
         self.record_path = None
-
-        _register_temp_for_windows()
 
     def start(self):
         """백그라운드 처리 스레드와 카메라를 시작합니다."""
