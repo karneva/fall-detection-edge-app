@@ -71,6 +71,9 @@ class LiveMode(BaseMode):
             self.presence_engine.reset()
             self.last_level1_event = None
             self.local_incident_ts = None
+
+            # 첫 낙상 시점에 모델 로드가 지연되지 않도록 분류기를 미리 로드/워밍업
+            self._warmup_classifier()
             
             self.is_running = True
             return True
@@ -78,6 +81,28 @@ class LiveMode(BaseMode):
             logger.error(f"Live Mode setup failed: {e}")
             return False
     
+    def _warmup_classifier(self):
+        """AI 분류기를 미리 로드합니다. 실패해도 룰 기반 감지는 그대로 동작합니다."""
+        if self.level1_engine.p.ai_mode == "off":
+            logger.info("[AI] AI_MODE=off. classifier not loaded")
+            return
+        try:
+            from ..ai_classifier.inference import get_classifier
+            clf = get_classifier()
+            ms = clf.warmup()
+            logger.info(f"[AI] mode={self.level1_engine.p.ai_mode} status={clf.status()} warmup_ms={ms}")
+        except Exception as e:
+            logger.error(f"[AI] classifier warmup failed: {e!r} -> rule-based only")
+
+    def _classifier_status(self) -> Dict[str, Any]:
+        if self.level1_engine.p.ai_mode == "off":
+            return {"mode": "off", "enabled": False}
+        try:
+            from ..ai_classifier.inference import get_classifier
+            return {"mode": self.level1_engine.p.ai_mode, **get_classifier().status()}
+        except Exception as e:
+            return {"mode": self.level1_engine.p.ai_mode, "enabled": False, "load_error": repr(e)}
+
     def cleanup(self):
         """모드 종료 시 리소스를 정리합니다."""
         self.is_running = False
@@ -89,6 +114,7 @@ class LiveMode(BaseMode):
         st = self.clip_recorder.status()
         return {
             "last_level1_event": self.last_level1_event,
+            "ai_classifier": self._classifier_status(),
             **st
         }
 
@@ -252,4 +278,5 @@ class LiveMode(BaseMode):
                     filename_prefix="suppressed",
                     subdir="not_fall"
                 )
-            self.local_incident_ts = None
+            # 사건은 끝나지 않았음 (억제 후 감시 중): 이후 승격된 level1도 같은 사건 시점으로 클립을 저장하도록
+            # local_incident_ts를 유지. 회복(abnormal_exit) 또는 level1 처리 시 초기화됨.

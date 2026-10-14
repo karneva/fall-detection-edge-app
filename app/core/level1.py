@@ -203,6 +203,11 @@ class Level1Engine:
         # 이상행동 중 붕괴 확정 래치
         self.abnormal_confirmed: bool = False
 
+        # AI 억제 이후 감시(suppressed-watch) 상태 (사건 단위)
+        self.ai_suppressed_ts: Optional[float] = None
+        self.ai_last: Optional[Dict[str, Any]] = None
+        self.enter_had_drop: bool = False
+
         self.height_hist = deque()   # (ts, h)
         self.height_acc_s: float = 0.0
         self.baseline_h_at_enter: Optional[float] = None
@@ -260,6 +265,7 @@ class Level1Engine:
         self.posture_acc_s = 0.0
         self.shoulder_acc_s = 0.0
         self.abnormal_confirmed = False
+        self._reset_incident_ai()
 
         self.height_hist.clear()
         self.height_acc_s = 0.0
@@ -267,6 +273,12 @@ class Level1Engine:
         self.kp_seq.clear()
         self.kp_ts.clear()
         self.switch_grace_until_ts = 0.0
+
+    def _reset_incident_ai(self):
+        """사건 단위 AI 억제/승격 상태를 초기화합니다."""
+        self.ai_suppressed_ts = None
+        self.ai_last = None
+        self.enter_had_drop = False
 
     def _compute_baseline_h(self, ts: float) -> Optional[float]:
         """일정 시간 동안의 높이 baseline(평균 신장)을 계산합니다."""
@@ -585,6 +597,9 @@ class Level1Engine:
                 self.baseline_at_enter = baseline
                 self.abnormal_stats = {}
                 self.abnormal_confirmed = False
+                self._reset_incident_ai()
+                # 진입을 일으킨 급하강은 NORMAL 분기에서 발생하므로 진입 시점에 따로 기록
+                self.enter_had_drop = (self.last_drop_ts is not None and ts - self.last_drop_ts <= 2.0)
 
                 self.enter_acc_s = 0.0
                 self.posture_acc_s = 0.0
@@ -652,34 +667,21 @@ class Level1Engine:
             else:
                 self.still_acc_s = max(0.0, self.still_acc_s - dt * DECAY)
 
-            # 낙상 판단 Case 1: 정지 상태가 일정 시간 지속됨
-            if self.still_acc_s >= self.p.sustain_s and not self.level1_fired:
-                self.level1_fired = True
-                self.state = "LEVEL1"
-                self.level1_ts = ts
-                self.cooldown_until_ts = ts + self.p.level1_cooldown_s
+            # 진입 직후(2초 이내)의 급하강도 '진입 급하강'으로 인정 (누운 뒤의 bbox 흔들림은 제외)
+            if vy is not None and vy > self.p.vy_th and time_since_abnormal <= 2.0:
+                self.enter_had_drop = True
 
+            # 낙상 판단 Case 1: 정지 상태가 일정 시간 지속됨
+            # (AI가 이미 이번 사건을 억제했다면 다시 묻지 않음: 사건당 AI 호출 1회)
+            if self.still_acc_s >= self.p.sustain_s and not self.level1_fired and self.ai_suppressed_ts is None:
                 # AI 2차 검증 수행
                 ai = self._verify_with_ai(ts)
                 if ai["suppress"]: # ADL (정상)으로 판정된 경우
                     logger.info(f"[AI SUPPRESSED] Rule-based detected fall, but AI says ADL (p_fall={ai['p_fall']:.2f})")
-                    event = {
-                        "type": "ai_suppressed",
-                        "ts": ts,
-                        "frame_index": frame_index,
-                        "reason": "still_for_sustain_s",
-                        "values": {
-                            "ai_conf": ai["conf"],
-                            "logic": "still_for_sustain_s",
-                            "ai": ai,
-                        }
-                    }
-                    self.reset_all()
-                    return event
+                    return self._enter_suppressed_watch(ts, frame_index, "still_for_sustain_s", ai)
 
-                self.is_ghost_mode = False
-                self.ghost_start_ts = None
-                
+                self._fire_level1(ts)
+
                 # 신뢰도 점수 계산
                 conf_score, conf_detail = self._calculate_confidence(abnormal_duration=time_since_abnormal)
 
@@ -699,34 +701,16 @@ class Level1Engine:
                 }
 
             # 낙상 판단 Case 2: 타임아웃 발생 (붕괴 확정 시에만)
-            if time_since_abnormal >= self.p.abnormal_timeout_s and not self.level1_fired:
+            if time_since_abnormal >= self.p.abnormal_timeout_s and not self.level1_fired and self.ai_suppressed_ts is None:
                 if (not self.p.timeout_requires_confirm) or self.abnormal_confirmed:
-                    self.level1_fired = True
-                    self.state = "LEVEL1"
-                    self.level1_ts = ts
-                    self.cooldown_until_ts = ts + self.p.level1_cooldown_s
-
                     # AI 2차 검증 수행 (타임아웃 시에도 적용)
                     ai = self._verify_with_ai(ts)
                     if ai["suppress"]:
                         logger.info(f"[AI SUPPRESSED] Timeout fall, but AI says ADL (p_fall={ai['p_fall']:.2f})")
-                        event = {
-                            "type": "ai_suppressed",
-                            "ts": ts,
-                            "frame_index": frame_index,
-                            "reason": "abnormal_timeout",
-                            "values": {
-                                "ai_conf": ai["conf"],
-                                "logic": "abnormal_timeout",
-                                "ai": ai,
-                            }
-                        }
-                        self.reset_all()
-                        return event
+                        return self._enter_suppressed_watch(ts, frame_index, "abnormal_timeout", ai)
 
-                    self.is_ghost_mode = False
-                    self.ghost_start_ts = None
-                    
+                    self._fire_level1(ts)
+
                     # 타임아웃의 경우에도 신뢰도 계산
                     conf_score, conf_detail = self._calculate_confidence(abnormal_duration=time_since_abnormal)
 
@@ -747,6 +731,34 @@ class Level1Engine:
                     }
                 else:
                     logger.info(f"[Timeout suppressed] abnormal_s={time_since_abnormal:.1f} but not confirmed. keep ABNORMAL")
+
+            # 낙상 판단 Case 3: AI 억제 이후에도 붕괴 상태가 오래 지속되면 AI와 무관하게 승격
+            if self.ai_suppressed_ts is not None and not self.level1_fired:
+                suppressed_for = ts - self.ai_suppressed_ts
+                had_drop = self.enter_had_drop
+                if (
+                    suppressed_for >= self.p.ai_escalate_s
+                    and self.abnormal_confirmed
+                    and (had_drop or not self.p.ai_escalate_requires_drop)
+                ):
+                    logger.warning(f"[AI ESCALATED] still collapsed {suppressed_for:.1f}s after AI suppression -> LEVEL1")
+                    self._fire_level1(ts)
+                    conf_score, conf_detail = self._calculate_confidence(abnormal_duration=time_since_abnormal)
+                    return {
+                        "type": "level1",
+                        "ts": ts,
+                        "frame_index": frame_index,
+                        "reason": "escalated_after_ai_suppression",
+                        "values": {
+                            "suppressed_for_s": suppressed_for,
+                            "time_since_abnormal": time_since_abnormal,
+                            "confirmed": self.abnormal_confirmed,
+                            "had_drop": had_drop,
+                            "confidence_score": conf_score,
+                            "confidence_detail": conf_detail,
+                            "ai": self.ai_last,
+                        },
+                    }
 
             if time_since_abnormal < self.p.recover_grace_s:
                 return None
@@ -780,6 +792,7 @@ class Level1Engine:
                 self.posture_acc_s = 0.0
                 self.shoulder_acc_s = 0.0
                 self.abnormal_confirmed = False
+                self._reset_incident_ai()
 
                 return {
                     "type": "abnormal_exit",
@@ -803,6 +816,39 @@ class Level1Engine:
             return None
 
         return None
+
+    def _fire_level1(self, ts: float):
+        """LEVEL1 확정 상태로 전환합니다. 쿨다운은 실제 알람을 낼 때만 설정합니다."""
+        self.level1_fired = True
+        self.state = "LEVEL1"
+        self.level1_ts = ts
+        self.cooldown_until_ts = ts + self.p.level1_cooldown_s
+        self.is_ghost_mode = False
+        self.ghost_start_ts = None
+
+    def _enter_suppressed_watch(self, ts: float, frame_index: int, logic: str, ai: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        AI 억제 후 감시 상태로 들어갑니다.
+
+        상태를 리셋하지 않고 ABNORMAL을 유지하며 쿨다운도 소모하지 않습니다.
+        (기존처럼 리셋하면 누워 있는 자세가 새 baseline이 되어 '회복'으로 오판되고,
+        같은 사람이 다시는 알람을 받지 못하는 문제가 있었음)
+        사람이 일어나면 기존 회복 판정으로 abnormal_exit, 붕괴가 오래 지속되면 승격(Case 3).
+        """
+        self.ai_suppressed_ts = ts
+        self.ai_last = ai
+        return {
+            "type": "ai_suppressed",
+            "ts": ts,
+            "frame_index": frame_index,
+            "reason": logic,
+            "values": {
+                "ai_conf": ai["conf"],
+                "logic": logic,
+                "ai": ai,
+                "escalate_after_s": self.p.ai_escalate_s,
+            },
+        }
 
     def _calculate_confidence(self, abnormal_duration: float) -> Tuple[float, Dict[str, float]]:
         """
