@@ -4,6 +4,7 @@ import time
 from typing import Optional, Dict, Any, List, Tuple, Callable
 
 logger = logging.getLogger(__name__)
+from .kp_buffer import TimedKeypointBuffer, kps_to_frame, window_summary
 from ..config import (
     DEVICE_ID, LOCATION_ID, ABNORMAL_TIMEOUT_S,
     AI_MODE, AI_SUPPRESS_PFALL_TH, AI_ESCALATE_S, AI_ESCALATE_REQUIRES_DROP,
@@ -126,6 +127,11 @@ class Level1Params:
     # 승격 직전 '지금도 쓰러져 있음'이 연속으로 유지되어야 하는 시간
     ai_escalate_collapse_s: float = 3.0
 
+    # 사건 구간 기록 (원시 키포인트, ABNORMAL 진입 기준)
+    event_buffer_s: float = 20.0
+    event_window_pre_s: float = 1.5
+    event_window_post_s: float = 2.5
+
 
 class _ClassifierVerifier:
     """기본 검증기: 1D CNN 분류기(싱글턴)를 지연 로드해서 사용합니다."""
@@ -219,6 +225,10 @@ class Level1Engine:
         self.kp_seq = deque(maxlen=30)
         self.kp_ts = deque(maxlen=30)
 
+        # 사건 구간 기록용 원시 키포인트 버퍼 (lost 프레임 포함, 시간 기준 보관)
+        self.kp_buffer = TimedKeypointBuffer(p.event_buffer_s)
+        self.event_window: Optional[Dict[str, Any]] = None
+
         # 타겟 스위칭 보호용 유예 설정
         self.switch_grace_until_ts: float = 0.0
         self.switch_grace_duration: float = 1.0 # 1초간 판단 유예
@@ -275,6 +285,7 @@ class Level1Engine:
         self.baseline_h_at_enter = None
         self.kp_seq.clear()
         self.kp_ts.clear()
+        self.kp_buffer.clear()
         self.switch_grace_until_ts = 0.0
 
     def _reset_incident_ai(self):
@@ -283,6 +294,7 @@ class Level1Engine:
         self.ai_last = None
         self.enter_had_drop = False
         self.collapsed_acc_s = 0.0
+        self.event_window = None
 
     def _compute_baseline_h(self, ts: float) -> Optional[float]:
         """일정 시간 동안의 높이 baseline(평균 신장)을 계산합니다."""
@@ -459,6 +471,7 @@ class Level1Engine:
             is_lost = True
 
         if is_lost:
+            self.kp_buffer.append(ts, None)
             self.present_streak = 0
             self.enter_acc_s = 0.0
             self.posture_acc_s = 0.0
@@ -507,6 +520,7 @@ class Level1Engine:
                     curr_kp_flat[kid*2+1] = float(k.get("y", 0.0))
         self.kp_seq.append(curr_kp_flat)
         self.kp_ts.append(ts)
+        self.kp_buffer.append(ts, kps_to_frame(t0.get("keypoints_raw") or t0.get("keypoints")), bbox)
 
         shoulder_vy, shoulder_drop = self._compute_shoulder_drop(ts, kps_list)
 
@@ -675,6 +689,10 @@ class Level1Engine:
             else:
                 self.still_acc_s = max(0.0, self.still_acc_s - dt * DECAY)
 
+            # 진입 후 post_s가 지나면 사건 구간(진입 -pre ~ +post)을 확정해 둠 (이후 승격 시에도 사용)
+            if self.event_window is None and time_since_abnormal >= self.p.event_window_post_s:
+                self._capture_event_window()
+
             # 진입 직후(2초 이내)의 급하강도 '진입 급하강'으로 인정 (누운 뒤의 bbox 흔들림은 제외)
             if vy is not None and vy > self.p.vy_th and time_since_abnormal <= 2.0:
                 self.enter_had_drop = True
@@ -684,6 +702,7 @@ class Level1Engine:
             if self.still_acc_s >= self.p.sustain_s and not self.level1_fired and self.ai_suppressed_ts is None:
                 # AI 2차 검증 수행
                 ai = self._verify_with_ai(ts)
+                self.ai_last = ai
                 if ai["suppress"]: # ADL (정상)으로 판정된 경우
                     logger.info(f"[AI SUPPRESSED] Rule-based detected fall, but AI says ADL (p_fall={ai['p_fall']:.2f})")
                     return self._enter_suppressed_watch(ts, frame_index, "still_for_sustain_s", ai)
@@ -705,6 +724,7 @@ class Level1Engine:
                         "confidence_score": conf_score,
                         "confidence_detail": conf_detail,
                         "ai": ai,
+                        "event_window": self._event_window_summary(),
                     },
                 }
 
@@ -713,6 +733,7 @@ class Level1Engine:
                 if (not self.p.timeout_requires_confirm) or self.abnormal_confirmed:
                     # AI 2차 검증 수행 (타임아웃 시에도 적용)
                     ai = self._verify_with_ai(ts)
+                    self.ai_last = ai
                     if ai["suppress"]:
                         logger.info(f"[AI SUPPRESSED] Timeout fall, but AI says ADL (p_fall={ai['p_fall']:.2f})")
                         return self._enter_suppressed_watch(ts, frame_index, "abnormal_timeout", ai)
@@ -735,6 +756,7 @@ class Level1Engine:
                             "confidence_score": conf_score,
                             "confidence_detail": conf_detail,
                             "ai": ai,
+                            "event_window": self._event_window_summary(),
                         },
                     }
                 else:
@@ -769,6 +791,7 @@ class Level1Engine:
                             "confidence_score": conf_score,
                             "confidence_detail": conf_detail,
                             "ai": self.ai_last,
+                            "event_window": self._event_window_summary(),
                         },
                     }
 
@@ -829,6 +852,32 @@ class Level1Engine:
 
         return None
 
+    def _capture_event_window(self):
+        if self.abnormal_start_ts is None:
+            return
+        t0 = self.abnormal_start_ts
+        self.event_window = self.kp_buffer.window(t0 - self.p.event_window_pre_s, t0 + self.p.event_window_post_s)
+
+    def _event_window_summary(self) -> Optional[Dict[str, Any]]:
+        if self.event_window is None:
+            self._capture_event_window()
+        return window_summary(self.event_window) if self.event_window is not None else None
+
+    def get_incident_snapshot(self) -> Dict[str, Any]:
+        """
+        현재 사건의 분석용 스냅샷 (sidecar 저장용).
+        - event_window: ABNORMAL 진입 기준 원시 키포인트 구간 (낙상 동작 포함, 학습/분석용)
+        - ai_input: AI가 실제로 본 30프레임과 시각
+        """
+        if self.event_window is None:
+            self._capture_event_window()
+        return {
+            "abnormal_start_ts": self.abnormal_start_ts,
+            "event_window": self.event_window,
+            "ai_input": {"ts": list(self.kp_ts), "kps": [list(f) for f in self.kp_seq]},
+            "ai": self.ai_last,
+        }
+
     def _fire_level1(self, ts: float):
         """LEVEL1 확정 상태로 전환합니다. 쿨다운은 실제 알람을 낼 때만 설정합니다."""
         self.level1_fired = True
@@ -859,6 +908,7 @@ class Level1Engine:
                 "logic": logic,
                 "ai": ai,
                 "escalate_after_s": self.p.ai_escalate_s,
+                "event_window": self._event_window_summary(),
             },
         }
 
