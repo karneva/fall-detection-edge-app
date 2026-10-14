@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from typing import Any, Dict, Optional, Tuple
 
@@ -165,22 +166,31 @@ class _DisabledClassifier(FallClassifier):
 
 # Singleton instance
 _classifier = None
+_classifier_lock = threading.Lock()
 
 
 def get_classifier() -> FallClassifier:
-    """분류기 싱글턴을 반환합니다. 예외를 던지지 않습니다."""
+    """분류기 싱글턴을 반환합니다. 예외를 던지지 않습니다. (스레드 안전, 모델은 한 번만 로드)"""
     global _classifier
     if _classifier is None:
-        try:
-            from app.config import AI_MODEL_PATH
-            _classifier = FallClassifier(model_path=AI_MODEL_PATH or None)
-        except Exception as e:
-            logger.exception("[AI] classifier init failed")
-            _classifier = _DisabledClassifier(f"init failed: {e!r}")
+        with _classifier_lock:
+            if _classifier is None:
+                try:
+                    from app.config import AI_MODEL_PATH
+                    _classifier = FallClassifier(model_path=AI_MODEL_PATH or None)
+                except Exception as e:
+                    logger.exception("[AI] classifier init failed")
+                    _classifier = _DisabledClassifier(f"init failed: {e!r}")
+    return _classifier
+
+
+def peek_classifier() -> Optional[FallClassifier]:
+    """이미 로드된 분류기를 반환합니다. 아직 없으면 None (로드하지 않음)."""
     return _classifier
 
 
 def reset_classifier():
     """테스트용: 싱글턴을 초기화합니다."""
     global _classifier
-    _classifier = None
+    with _classifier_lock:
+        _classifier = None

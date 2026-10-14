@@ -52,6 +52,30 @@ class NoTorchTest(unittest.TestCase):
         self.assertIn("boom", clf.status()["load_error"])
         inference.reset_classifier()
 
+    def test_singleton_built_once_under_concurrency(self):
+        import threading
+        import time as _time
+        from app.ai_classifier import inference
+
+        built = []
+
+        def slow_ctor(*args, **kwargs):
+            built.append(1)
+            _time.sleep(0.05)
+            return inference._DisabledClassifier("fake")
+
+        inference.reset_classifier()
+        self.assertIsNone(inference.peek_classifier())
+        with mock.patch.object(inference, "FallClassifier", side_effect=slow_ctor):
+            threads = [threading.Thread(target=inference.get_classifier) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(len(built), 1)
+        self.assertIsNotNone(inference.peek_classifier())
+        inference.reset_classifier()
+
 
 @unittest.skipUnless(HAS_NUMPY and HAS_TORCH, "numpy/torch not installed")
 class TorchLoadTest(unittest.TestCase):

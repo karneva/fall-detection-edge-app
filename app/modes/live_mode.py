@@ -98,8 +98,12 @@ class LiveMode(BaseMode):
         if self.level1_engine.p.ai_mode == "off":
             return {"mode": "off", "enabled": False}
         try:
-            from ..ai_classifier.inference import get_classifier
-            return {"mode": self.level1_engine.p.ai_mode, **get_classifier().status()}
+            # 상태 조회(API 스레드)에서는 모델을 로드하지 않음
+            from ..ai_classifier.inference import peek_classifier
+            clf = peek_classifier()
+            if clf is None:
+                return {"mode": self.level1_engine.p.ai_mode, "enabled": None, "state": "not_loaded"}
+            return {"mode": self.level1_engine.p.ai_mode, **clf.status()}
         except Exception as e:
             return {"mode": self.level1_engine.p.ai_mode, "enabled": False, "load_error": repr(e)}
 
