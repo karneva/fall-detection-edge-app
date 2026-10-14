@@ -119,7 +119,7 @@ ABNORMAL 상태에서는 아래를 계속 누적합니다.
 - 정지 상태 유지 시간
 - 부분 신체 비율
 
-### LEVEL1로 가는 두 가지 경로
+### LEVEL1로 가는 세 가지 경로
 
 #### 1. 정지 상태 지속
 
@@ -128,6 +128,19 @@ ABNORMAL 상태에서는 아래를 계속 누적합니다.
 #### 2. 타임아웃 확정
 
 `abnormal_timeout_s` 이상 경과했는데도 회복하지 않고, 붕괴가 확인된 상태면 `LEVEL1`로 확정합니다.
+
+1, 2번 경로는 모두 확정 직전에 AI 2차 검증을 거칩니다. (8장 참고)
+
+#### 3. AI 억제 후 승격 (escalation)
+
+AI가 억제한 사건이라도 아래 조건을 모두 만족하면 AI와 무관하게 `LEVEL1`을 냅니다.
+이벤트 `reason`은 `escalated_after_ai_suppression`입니다.
+
+- 억제 후 `AI_ESCALATE_S`(기본 60초) 이상 회복하지 않음
+- 붕괴 확정(`abnormal_confirmed`)
+- 지금도 붕괴 자세(aspect 기준)가 `ai_escalate_collapse_s`(3초) 이상 연속 유지
+  (억제 후 일어나 화면 밖으로 나갔다가 서서 돌아온 경우 등의 오알람 방지)
+- ABNORMAL 진입 전후 2초 안에 급하강(`vy > vy_th`)이 있었음 (`AI_ESCALATE_REQUIRES_DROP=1`일 때)
 
 ## 6. ABNORMAL -> NORMAL 회복
 
@@ -164,19 +177,58 @@ ABNORMAL 상태에서는 아래를 계속 누적합니다.
 
 ### 출력 해석
 
-- `1`: Fall
-- `0`: ADL
-- confidence가 threshold 미만이면 불확실
+분류기는 낙상 확률 `p_fall`(0~1)을 냅니다 (`FallClassifier.predict_proba`).
 
-### 불확실한 경우
+- `p_fall <= AI_SUPPRESS_PFALL_TH`(기본 0.4): ADL 판정
+- 그 외: Fall 판정
 
-AI가 확신하지 못하면 보수적으로 규칙 기반 결과를 유지합니다.
+기본값 0.4는 기존 규칙(`ADL로 판정 & softmax 최댓값 >= 0.6`)과 동치입니다.
 
-### ADL 판정인 경우
+### AI 게이트 안전 정책
 
-규칙 기반 낙상은 `ai_suppressed`로 반려됩니다.
+AI는 룰 기반 낙상 알람을 "조용히" 지울 수 없어야 합니다. 이를 위해 아래를 보장합니다.
 
-이 구조는 안전성과 오탐 억제 사이에서 보수적으로 설계된 것입니다.
+1. fail-open
+   가중치 없음, 로드 실패, torch/numpy import 실패, 추론 예외, `None`/NaN/범위 밖 값, 프레임 부족이면
+   룰 결과(낙상)를 그대로 따릅니다. 초기화되지 않은 랜덤 모델은 절대 사용하지 않습니다.
+2. 억제는 사건당 1회
+   ADL로 판정되면 `ai_suppressed` 이벤트를 내고 ABNORMAL 상태를 유지합니다(suppressed-watch).
+   상태 리셋이나 쿨다운 소모가 없고, 같은 사건에서 AI를 다시 호출하지 않습니다.
+   - 사람이 일어나면 기존 회복 판정으로 `abnormal_exit`
+   - 붕괴가 오래 지속되면 5장의 승격 경로로 `LEVEL1`
+3. 모드 선택 (`AI_MODE`)
+   - `veto`: ADL 판정 시 억제 (기본)
+   - `shadow`: 판정만 기록하고 억제하지 않음 (현장 데이터 수집용)
+   - `off`: 분류기를 호출하지 않음
+   - 알 수 없는 값은 억제하지 않음
+
+### 이벤트에 남는 AI 정보
+
+`level1`, `ai_suppressed` 이벤트의 `values.ai`에 아래가 기록됩니다.
+
+| 키 | 의미 |
+| --- | --- |
+| `mode` | veto / shadow / off |
+| `decision` | fall / adl / unavailable / error / off |
+| `p_fall`, `conf` | 낙상 확률, max(p, 1-p) |
+| `suppress` | 실제로 억제했는지 |
+| `window_start_ts`, `window_end_ts` | 분류한 30프레임 창의 시간 범위 |
+| `window_offset_from_abnormal_s` | ABNORMAL 진입 시점 대비 창 시작 오프셋 |
+| `latency_ms`, `model_id` | 추론 시간, 가중치 sha256 앞 8자리 |
+
+`ai_suppressed`에는 기존 키 `ai_conf`, `logic`도 그대로 남습니다.
+
+### 알려진 한계
+
+- CNN이 보는 창은 LEVEL1 시점의 최근 30프레임이라, 넘어지는 동작이 아니라 "누워서 정지" 구간입니다.
+  (`window_offset_from_abnormal_s`가 보통 `sustain_s - 2`초 이상) 로드맵 Day 5에서 해결합니다.
+- LEVEL1 이후 리셋되면 누운 자세가 새 baseline이 되어 `abnormal_enter`/`abnormal_exit`가 몇 초 주기로 반복됩니다.
+- 사람이 계속 미검출(lost)이거나 품질이 낮으면 승격 조건이 평가되지 않습니다.
+- 억제 후 감시 중에 대상 스위칭(`target_switched`) 등으로 `reset_all`이 일어나면 승격 대기도 사라집니다. (Day 5)
+- 급하강 없이 천천히 무너진 낙상을 AI가 억제하면 기본 설정에서는 승격되지 않습니다.
+  침대에 눕기 같은 ADL과 구분할 수 없기 때문이며, 낙상 동작을 보는 Day 5의 창 정렬로 해결합니다.
+- 승격된 알람의 클립은 ABNORMAL 진입 시점 기준으로 자릅니다. 클립 링버퍼(24fps 기준 약 80초)보다
+  `ABNORMAL_TIMEOUT_S + AI_ESCALATE_S`가 길면 앞부분이 잘릴 수 있습니다.
 
 ## 9. 신뢰도 점수
 
@@ -207,3 +259,4 @@ AI가 확신하지 못하면 보수적으로 규칙 기반 결과를 유지합�
 - 카메라 각도와 화각에 따라 임계값 민감도 변화 가능
 - 전신이 잘리지 않는 장면에서 더 안정적
 - 데이터셋 품질에 따라 2차 분류기 성능 편차 가능
+- 개선 계획은 [ROADMAP.md](ROADMAP.md) 참고

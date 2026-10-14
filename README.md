@@ -538,6 +538,7 @@ python3 -m app.ai_classifier.retrain_from_runs
 - [docs/FALL_DETECTION_CORE.md](docs/FALL_DETECTION_CORE.md)
 - [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - [docs/TUNING_GUIDE.md](docs/TUNING_GUIDE.md)
+- [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## 한계와 참고 사항
 

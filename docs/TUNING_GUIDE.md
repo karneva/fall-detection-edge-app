@@ -152,16 +152,36 @@
 관련 위치:
 
 - `app/ai_classifier/inference.py`
+- `app/core/level1.py` (`_verify_with_ai`, 승격 로직)
 
-현재 기본값:
+환경변수:
 
-- `threshold=0.6`
-- 최근 30프레임 시퀀스 사용
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `AI_MODE` | `veto` | `veto` 억제 / `shadow` 기록만 / `off` 미사용 |
+| `AI_MODEL_PATH` | (빈 값) | 가중치 경로. 비우면 `app/ai_classifier/weights/`의 `fall_model_active_best.pth` → `fall_model_best.pth` 순서로 탐색 |
+| `AI_SUPPRESS_PFALL_TH` | `0.4` | `p_fall`이 이 값 이하일 때만 억제. 0.4는 기존 동작과 동치 |
+| `AI_ESCALATE_S` | `60.0` | 억제 후 이 시간 이상 붕괴가 지속되면 알람 승격 |
+| `AI_ESCALATE_REQUIRES_DROP` | `1` | 승격에 진입 시점 급하강을 요구할지 여부 |
 
 튜닝 방향:
 
-- AI가 너무 자주 판단을 보류하면 threshold를 낮춤
-- AI가 너무 공격적으로 룰베이스를 반려하면 threshold를 높임
+- AI가 실제 낙상을 너무 자주 억제하면 `AI_SUPPRESS_PFALL_TH`를 낮춤 (예: 0.2)
+- 하드 ADL 오탐이 여전히 많으면 임계값을 올리기 전에 shadow 모드로 `p_fall` 분포부터 확인
+- 억제된 실제 낙상의 알람 지연을 줄이려면 `AI_ESCALATE_S`를 낮춤 (오탐 증가와 교환)
+
+가중치 확인:
+
+- 시작 로그 `[AI] mode=... status={'enabled': True, 'weights_hash': ...}`로 로드 여부를 확인합니다.
+- `enabled: False`면 AI 없이 룰 기반으로만 동작합니다 (알람은 정상 송출).
+- `/health`, `/level1/status` 응답의 `ai_classifier` 항목에서도 같은 정보를 볼 수 있습니다.
+  (분류기가 아직 로드되기 전이면 `state: not_loaded`)
+
+shadow 모드로 현장 데이터 모으기:
+
+1. `AI_MODE=shadow`로 실행합니다. 알람은 룰 기반 그대로 나갑니다.
+2. `level1` 이벤트의 `values.ai.p_fall`과 실제 상황(낙상/오탐)을 함께 기록합니다.
+3. 실제 낙상의 `p_fall`이 임계값 아래로 내려가는 사례가 없을 때 `veto`로 전환합니다.
 
 주의:
 
@@ -175,7 +195,7 @@ AI 분류기 튜닝은 모델 가중치 품질과 데이터셋 구성의 영향�
 1. YOLO Pose 안정화
 2. EMA 스무딩 조정
 3. Level1 규칙 기반 튜닝
-4. AI threshold 미세 조정
+4. AI 임계값(`AI_SUPPRESS_PFALL_TH`) 미세 조정
 
 이 순서를 권장하는 이유는, 상위 입력 품질이 나쁘면 뒤쪽 파라미터를 아무리 만져도 효과가 제한적이기 때문입니다.
 
