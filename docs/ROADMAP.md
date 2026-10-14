@@ -55,9 +55,17 @@ CNN이 실제 낙상 알람을 조용히 지우는 경로를 막았습니다. �
 - [ ] 가중치 폴더 이름을 잠시 바꾼 뒤 `classifier DISABLED` 로그가 나오고 낙상 시 level1이 정상 송출되는지
 - [ ] `AI_MODE=shadow`로 낙상을 연출해 `values.ai.p_fall`이 기록되는지
 
-### Day 2: 측정 체계
+### Day 2: 측정 체계 ✅
 
 판정 로직은 바꾸지 않고, 이후 변경을 숫자로 비교할 수 있게 합니다.
+
+- [x] `app.eval`: 이벤트 단위 replay 평가, 결과 비교와 채택 규칙, 합성 baseline
+- [x] `evalset_tools` 누수 검사 강화, manifest/라벨 예시
+- [x] 타임스탬프 원시 키포인트 버퍼, ABNORMAL 진입 시점 사건 구간 기록
+- [x] 이벤트 sidecar, 억제 클립에 AI 판정 구간 포함, 실측 FPS
+- [ ] [owner] 아래 녹화/라벨링
+
+계획했던 내용:
 
 - `tools/replay_eval.py`: 녹화된 `obs_*.jsonl`과 라벨을 받아 엔진을 오프라인으로 재생합니다.
   rules-only와 rules+AI를 비교하고, 이벤트 recall, 시간당 오탐, 알람 지연, 억제된 실제 낙상 수를 냅니다.

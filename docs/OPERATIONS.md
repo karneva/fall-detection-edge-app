@@ -107,7 +107,8 @@ docker-compose up -d --build
 - YOLO 모델 로드 성공
 - `/pose` 응답 생성 여부
 - `/health`의 `processing_mode=live`
-- 낙상 시 `runs/clips/`에 파일 생성 여부
+- 낙상 시 `runs/clips/`, `runs/events/`에 파일 생성 여부
+- `/health`의 `ai_classifier.enabled`, `processing_fps`
 
 ## 저장 파일
 
@@ -116,7 +117,9 @@ docker-compose up -d --build
 - `runs/device_state.json`
 - `runs/*.jsonl`
 - `runs/clips/fall/*.mp4`
-- `runs/clips/not_fall/*.mp4`
+- `runs/clips/not_fall/*.mp4` (AI가 억제한 사건, 검수 전에는 라벨 미확정)
+- `runs/events/*.json` (낙상/억제 이벤트 sidecar: 판정 근거 키포인트, AI 입력, 파라미터. `SAVE_EVENT_SIDECAR=0`으로 끔)
+- `runs/eval/*.json` (`app.eval.replay_eval` 결과)
 
 공개 저장소에서는 이 파일들을 커밋하지 않는 것이 맞습니다.
 
