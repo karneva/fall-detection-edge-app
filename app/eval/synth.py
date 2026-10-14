@@ -1,5 +1,5 @@
 """
-Level1Engine 회귀 테스트용 합성 관측(obs) 생성기 (표준 라이브러리만 사용)
+Level1Engine 회귀 테스트/오프라인 평가용 합성 관측(obs) 생성기 (표준 라이브러리만 사용)
 
 실제 영상을 대체하지는 못하지만, 상태 전이/AI 게이트/쿨다운 같은 제어 흐름을
 결정적으로 재현하기 위한 용도입니다.
@@ -168,6 +168,18 @@ def make_scenario(name: str, fps: float = 15.0, seed: int = 0, lie_s: float = 90
 
     truth.update({"scenario": name, "fps": fps})
     return obs_list, truth
+
+
+# 평가용 합성 세트: (시나리오, 채점 라벨)
+# fall_then_recover는 3초 만에 스스로 일어나 알람이 필요 없으므로 adl로 채점
+EVAL_SET = (
+    ("stand", "adl"),
+    ("lie_on_bed_slow", "adl"),
+    ("fall_then_recover", "adl"),
+    ("fast_fall", "fall"),
+    ("fall_writhe", "fall"),
+    ("fall_lie_then_get_up", "fall"),
+)
 
 
 def run_engine(obs_list, params=None, verifier=None) -> List[Dict[str, Any]]:

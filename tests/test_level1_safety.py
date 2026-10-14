@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 from app.core.level1 import Level1Params
-from tests.synth import CountingVerifier, RaisingVerifier, make_scenario, run_engine
+from app.eval.synth import CountingVerifier, RaisingVerifier, make_scenario, run_engine
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
