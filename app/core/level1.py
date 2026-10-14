@@ -1,11 +1,9 @@
 import logging
-import numpy as np
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List, Tuple
 
 logger = logging.getLogger(__name__)
 from ..config import DEVICE_ID, LOCATION_ID, ABNORMAL_TIMEOUT_S
-from ..ai_classifier.inference import get_classifier
 
 def bbox_aspect(bbox: Optional[List[float]]) -> Optional[float]:
     """바운딩 박스의 가로세로비(Height/Width)를 계산합니다."""
@@ -452,7 +450,7 @@ class Level1Engine:
             self.last_drop_vy = vy
 
         # AI 검증용 시퀀스 업데이트
-        curr_kp_flat = np.zeros(34, dtype=np.float32)
+        curr_kp_flat = [0.0] * 34
         if kps_list:
             for k in kps_list:
                 kid = int(k.get("id", -1))
@@ -814,6 +812,8 @@ class Level1Engine:
         if len(self.kp_seq) < 30:
             return 1, 1.0 # 데이터 부족 시 일단 규칙 기반 결과 유지
             
+        from ..ai_classifier.inference import get_classifier
+
         classifier = get_classifier()
         label, conf = classifier.predict(list(self.kp_seq))
         
