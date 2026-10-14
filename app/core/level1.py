@@ -123,6 +123,8 @@ class Level1Params:
     ai_suppress_pfall_th: float = AI_SUPPRESS_PFALL_TH
     ai_escalate_s: float = AI_ESCALATE_S
     ai_escalate_requires_drop: bool = AI_ESCALATE_REQUIRES_DROP
+    # 승격 직전 '지금도 쓰러져 있음'이 연속으로 유지되어야 하는 시간
+    ai_escalate_collapse_s: float = 3.0
 
 
 class _ClassifierVerifier:
@@ -207,6 +209,7 @@ class Level1Engine:
         self.ai_suppressed_ts: Optional[float] = None
         self.ai_last: Optional[Dict[str, Any]] = None
         self.enter_had_drop: bool = False
+        self.collapsed_acc_s: float = 0.0
 
         self.height_hist = deque()   # (ts, h)
         self.height_acc_s: float = 0.0
@@ -279,6 +282,7 @@ class Level1Engine:
         self.ai_suppressed_ts = None
         self.ai_last = None
         self.enter_had_drop = False
+        self.collapsed_acc_s = 0.0
 
     def _compute_baseline_h(self, ts: float) -> Optional[float]:
         """일정 시간 동안의 높이 baseline(평균 신장)을 계산합니다."""
@@ -656,8 +660,12 @@ class Level1Engine:
 
             # 붕괴 여부 확정(Latch)
             base = self.baseline_at_enter if self.baseline_at_enter is not None else baseline
-            if (base is not None and aspect < base * self.p.confirm_aspect_rel) or (aspect < self.p.confirm_aspect_abs) or (drop_signal and (vy is not None and vy > self.p.vy_th)):
+            collapsed_now = (base is not None and aspect < base * self.p.confirm_aspect_rel) or (aspect < self.p.confirm_aspect_abs)
+            if collapsed_now or (drop_signal and (vy is not None and vy > self.p.vy_th)):
                 self.abnormal_confirmed = True
+
+            # 현재 붕괴 자세가 연속으로 유지된 시간 (승격 판단용, 한 번이라도 벗어나면 0)
+            self.collapsed_acc_s = (self.collapsed_acc_s + dt) if collapsed_now else 0.0
 
             # 정지 상태 확인 (감쇠 적용)
             DECAY = 2.0
@@ -733,12 +741,15 @@ class Level1Engine:
                     logger.info(f"[Timeout suppressed] abnormal_s={time_since_abnormal:.1f} but not confirmed. keep ABNORMAL")
 
             # 낙상 판단 Case 3: AI 억제 이후에도 붕괴 상태가 오래 지속되면 AI와 무관하게 승격
+            # 래치된 플래그만 보지 않고 '지금도 쓰러져 있음'을 연속으로 확인함
+            # (억제 후 일어나 화면 밖으로 나갔다가 서서 돌아온 경우 등의 오알람 방지)
             if self.ai_suppressed_ts is not None and not self.level1_fired:
                 suppressed_for = ts - self.ai_suppressed_ts
                 had_drop = self.enter_had_drop
                 if (
                     suppressed_for >= self.p.ai_escalate_s
                     and self.abnormal_confirmed
+                    and self.collapsed_acc_s >= self.p.ai_escalate_collapse_s
                     and (had_drop or not self.p.ai_escalate_requires_drop)
                 ):
                     logger.warning(f"[AI ESCALATED] still collapsed {suppressed_for:.1f}s after AI suppression -> LEVEL1")
@@ -754,6 +765,7 @@ class Level1Engine:
                             "time_since_abnormal": time_since_abnormal,
                             "confirmed": self.abnormal_confirmed,
                             "had_drop": had_drop,
+                            "collapsed_for_s": self.collapsed_acc_s,
                             "confidence_score": conf_score,
                             "confidence_detail": conf_detail,
                             "ai": self.ai_last,
@@ -949,7 +961,7 @@ class Level1Engine:
 
         try:
             p_fall = float(p_fall)
-        except (TypeError, ValueError):
+        except Exception:
             logger.error(f"[AI ERROR] verifier returned non-numeric {p_fall!r}. Defaulting to rule-base.")
             ai["decision"] = "error"
             return ai

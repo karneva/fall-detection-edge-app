@@ -20,8 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def params(**overrides) -> Level1Params:
-    """환경변수에 영향받지 않도록 AI 관련 값을 명시한 파라미터."""
+    """환경변수(ABNORMAL_TIMEOUT_S, AI_*)에 영향받지 않도록 기본값을 명시한 파라미터."""
     base = dict(
+        sustain_s=10.0,
+        abnormal_timeout_s=10.0,
         ai_mode="veto",
         ai_suppress_pfall_th=0.4,
         ai_escalate_s=60.0,
@@ -105,7 +107,7 @@ class AiGateTest(unittest.TestCase):
         import logging
         logging.disable(logging.CRITICAL)
         try:
-            for bad in (float("nan"), -0.1, 1.5, "abc"):
+            for bad in (float("nan"), -0.1, 1.5, "abc", 10 ** 400, object()):
                 events = run_engine(self.obs, params(), CountingVerifier(bad))
                 level1 = of_type(events, "level1")
                 self.assertEqual(len(level1), 1, bad)
@@ -182,6 +184,42 @@ class SuppressionWatchTest(unittest.TestCase):
         self.assertEqual(len(of_type(events, "abnormal_enter")), 1)
         self.assertEqual(of_type(events, "abnormal_exit"), [])
 
+    def test_timeout_path_suppression_keeps_watch_and_escalates(self):
+        # 바닥에서 계속 움직여 정지 판정이 안 되면 Case 2(abnormal_timeout)로 검증됨
+        from app.core.level1 import Level1Engine
+
+        obs, _ = make_scenario("fall_writhe", lie_s=90.0)
+        v = CountingVerifier(0.05)
+        engine = Level1Engine(params(), verifier=v)
+        events, supp_state = [], None
+        for o in obs:
+            ev = engine.step(o)
+            if ev is None:
+                continue
+            events.append(ev)
+            if ev["type"] == "ai_suppressed":
+                supp_state = (engine.state, engine.cooldown_until_ts)
+
+        sup = of_type(events, "ai_suppressed")
+        self.assertEqual(len(sup), 1)
+        self.assertEqual(sup[0]["reason"], "abnormal_timeout")
+        self.assertEqual(supp_state, ("ABNORMAL", 0.0))
+        level1 = of_type(events, "level1")
+        self.assertEqual(len(level1), 1)
+        self.assertEqual(level1[0]["reason"], "escalated_after_ai_suppression")
+        self.assertTrue(sup[0]["ts"] + 60.0 <= level1[0]["ts"] <= sup[0]["ts"] + 61.5)
+        self.assertEqual(v.calls, 1)
+
+    def test_no_escalation_when_person_returns_standing(self):
+        # 억제 후 일어나 회복 판정 전에 화면 밖으로 나갔다가, 60초 넘게 지나 서서 돌아온 경우
+        obs, _ = make_scenario("suppressed_leave_and_return")
+        v = CountingVerifier(0.05)
+        events = run_engine(obs, params(), v)
+        self.assertEqual(len(of_type(events, "ai_suppressed")), 1)
+        self.assertEqual(of_type(events, "level1"), [])
+        self.assertEqual(of_type(events, "abnormal_exit")[-1]["reason"], "recovered")
+        self.assertEqual(v.calls, 1)
+
     def test_escalation_can_be_tuned(self):
         obs, _ = make_scenario("fast_fall", lie_s=40.0)
         events = run_engine(obs, params(ai_escalate_s=20.0), CountingVerifier(0.05))
@@ -194,8 +232,10 @@ class SuppressionWatchTest(unittest.TestCase):
         obs, _ = make_scenario("lie_on_bed_slow", lie_s=90.0)
         v = CountingVerifier(0.05)
         events = run_engine(obs, params(), v)
+        # 억제 경로를 실제로 거친 뒤(급하강 없음) 승격되지 않아야 함
+        self.assertEqual(len(of_type(events, "ai_suppressed")), 1)
         self.assertEqual(of_type(events, "level1"), [])
-        self.assertLessEqual(v.calls, 1)
+        self.assertEqual(v.calls, 1)
 
     def test_slow_lie_escalates_when_drop_not_required(self):
         obs, _ = make_scenario("lie_on_bed_slow", lie_s=90.0)

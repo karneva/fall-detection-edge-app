@@ -91,11 +91,17 @@ def make_scenario(name: str, fps: float = 15.0, seed: int = 0, lie_s: float = 90
     - lie_on_bed_slow: 3초 직립 -> 4초에 걸쳐 천천히 눕기 -> lie_s초 정지 (adl)
     - fall_then_recover: fast_fall 후 3초 누움 -> 1.5초 기립 -> 10초 직립 (fall, 알람 기대 안 함)
     - fall_lie_then_get_up: fast_fall 후 20초 누움 -> 1.5초 기립 -> 10초 직립
+    - fall_writhe: fast_fall 후 lie_s초 동안 바닥에서 계속 움직임 (정지 판정 안 됨 -> 타임아웃 경로)
+    - suppressed_leave_and_return: fast_fall 후 12초 누움 -> 기립 -> 0.3초 서 있다가 화면 밖
+      -> 120초 부재 -> 서서 재등장 15초
     """
     rng = random.Random(seed)
     dt = 1.0 / fps
-    # (지속시간, 함수(u) -> (hip_y, angle)) 구간 목록
+    # (지속시간, 함수(u) -> (hip_y, angle) 또는 None(사람 없음)[, jitter]) 구간 목록
     stand = lambda u: (STAND_HIP_Y, 0.0)
+    lie = lambda u: (LIE_HIP_Y, math.pi / 2)
+    falling = lambda u: (_lerp(STAND_HIP_Y, LIE_HIP_Y, u), _lerp(0.0, math.pi / 2, u))
+    getting_up = lambda u: (_lerp(LIE_HIP_Y, STAND_HIP_Y, u), _lerp(math.pi / 2, 0.0, u))
     if name == "stand":
         segs = [(60.0, stand)]
         truth = {"label": "adl", "fall_start_ts": None, "fall_end_ts": None}
@@ -131,19 +137,32 @@ def make_scenario(name: str, fps: float = 15.0, seed: int = 0, lie_s: float = 90
             (10.0, stand),
         ]
         truth = {"label": "fall", "fall_start_ts": t0 + 3.0, "fall_end_ts": t0 + 3.5}
+    elif name == "fall_writhe":
+        segs = [(3.0, stand), (0.5, falling), (lie_s, lie, 0.015)]
+        truth = {"label": "fall", "fall_start_ts": t0 + 3.0, "fall_end_ts": t0 + 3.5}
+    elif name == "suppressed_leave_and_return":
+        segs = [
+            (3.0, stand), (0.5, falling), (12.0, lie), (1.5, getting_up), (0.3, stand),
+            (120.0, lambda u: None),
+            (15.0, stand),
+        ]
+        truth = {"label": "adl", "fall_start_ts": None, "fall_end_ts": None}
     else:
         raise ValueError(f"unknown scenario: {name}")
 
     obs_list = []
     i = 0
     seg_start = 0.0
-    for dur, fn in segs:
+    for seg in segs:
+        dur, fn = seg[0], seg[1]
+        jitter = seg[2] if len(seg) > 2 else 0.0005
         n = max(1, int(round(dur * fps)))
         for j in range(n):
             u = j / max(1, n - 1)
-            hip_y, angle = fn(u)
+            pose = fn(u)
             ts = t0 + seg_start + j * dt
-            obs_list.append(make_obs(ts, i, skeleton(0.5, hip_y, HEIGHT, angle, rng)))
+            kps = None if pose is None else skeleton(0.5, pose[0], HEIGHT, pose[1], rng, jitter=jitter)
+            obs_list.append(make_obs(ts, i, kps))
             i += 1
         seg_start += n * dt
 
