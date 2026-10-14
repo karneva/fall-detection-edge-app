@@ -79,6 +79,50 @@ class EngineEventWindowTest(unittest.TestCase):
         self.assertEqual(esc["values"]["event_window"], sup["values"]["event_window"])
         self.assertLessEqual(esc["values"]["event_window"]["t_start"], truth["fall_start_ts"])
 
+    def test_escalated_snapshot_keeps_ai_input_from_decision_time(self):
+        obs, _ = make_scenario("fast_fall", lie_s=90.0)
+        engine = Level1Engine(params(), verifier=CountingVerifier(0.05))
+        sup = self.run_until(obs, engine, ("ai_suppressed",))
+        sup_input = engine.get_incident_snapshot()["ai_input"]
+        rest = obs[[o["ts"] for o in obs].index(sup["ts"]) + 1:]
+        esc = self.run_until(rest, engine, ("level1",))
+        snap = engine.get_incident_snapshot()
+        self.assertEqual(esc["reason"], "escalated_after_ai_suppression")
+        self.assertEqual(snap["ai_input"], sup_input)
+        self.assertAlmostEqual(snap["ai_input"]["ts"][0], snap["ai"]["window_start_ts"])
+        self.assertAlmostEqual(snap["ai_input"]["ts"][-1], snap["ai"]["window_end_ts"])
+
+    def test_long_occlusion_after_entry_keeps_fall_window(self):
+        # 진입 직후부터 25초간 가려져도(버퍼 20초) 낙상 구간이 남아 있어야 함
+        obs, truth = make_scenario("fast_fall", lie_s=40.0)
+        start = truth["fall_start_ts"] + 1.0
+        for o in obs:
+            if start <= o["ts"] < start + 25.0:
+                o.update(make_obs(o["ts"], o["frame_index"], None))
+        engine = Level1Engine(params(), verifier=CountingVerifier(0.9))
+        self.run_until(obs, engine, ("level1",))
+        win = engine.get_incident_snapshot()["event_window"]
+        self.assertFalse(win["truncated"])
+        self.assertLessEqual(win["t_start"], truth["fall_start_ts"])
+        self.assertGreater(win["n_frames"] - win["n_missing"], 0)
+
+    def test_low_posture_entry_anchors_window_at_posture_start(self):
+        # LEVEL1 후 리셋되면 누운 자세로 저자세 지속(low_posture_sustained) 재진입이 발생
+        obs, _ = make_scenario("fast_fall", lie_s=60.0)
+        engine = Level1Engine(params(), verifier=CountingVerifier(0.9))
+        it = iter(obs)
+        for o in it:
+            ev = engine.step(o)
+            if ev and ev["type"] == "abnormal_enter" and "low_posture" in ev["values"]["reason"]:
+                break
+        else:
+            self.fail("no low_posture_sustained entry")
+        # (이 합성 시나리오는 몇 초 뒤 회복 판정이 나므로 진입 직후에 확인)
+        snap = engine.get_incident_snapshot()
+        self.assertEqual(snap["enter_reason"], "low_posture_sustained")
+        self.assertLess(snap["event_anchor_ts"], snap["abnormal_start_ts"] - 2.0)
+        self.assertAlmostEqual(snap["event_window"]["t_start"], snap["event_anchor_ts"] - 1.5)
+
     def test_lost_frames_recorded_as_missing(self):
         obs, truth = make_scenario("fast_fall", lie_s=20.0)
         # 낙상 동작 중 0.4초간 미검출

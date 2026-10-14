@@ -182,6 +182,7 @@ class Level1Engine:
         self.aspect_hist = deque()
 
         self.low_posture_cnt = 0
+        self.low_posture_start_ts: Optional[float] = None
 
         self.ghost_start_ts: Optional[float] = None
         self.is_ghost_mode: bool = False
@@ -228,6 +229,11 @@ class Level1Engine:
         # 사건 구간 기록용 원시 키포인트 버퍼 (lost 프레임 포함, 시간 기준 보관)
         self.kp_buffer = TimedKeypointBuffer(p.event_buffer_s)
         self.event_window: Optional[Dict[str, Any]] = None
+        # 사건 구간 시작 기준 시각 (저자세 지속 진입이면 저자세가 시작된 시각)
+        self.event_anchor_ts: Optional[float] = None
+        self.enter_reason: Optional[str] = None
+        # AI가 실제로 본 입력 (판정 시점에 복사, 승격 시점의 버퍼와 혼동 방지)
+        self.ai_input_last: Optional[Dict[str, Any]] = None
 
         # 타겟 스위칭 보호용 유예 설정
         self.switch_grace_until_ts: float = 0.0
@@ -251,6 +257,7 @@ class Level1Engine:
         self.drop_hits.clear()
         self.aspect_hist.clear()
         self.low_posture_cnt = 0
+        self.low_posture_start_ts = None
 
         self.ghost_start_ts = None
         self.is_ghost_mode = False
@@ -295,6 +302,9 @@ class Level1Engine:
         self.enter_had_drop = False
         self.collapsed_acc_s = 0.0
         self.event_window = None
+        self.event_anchor_ts = None
+        self.enter_reason = None
+        self.ai_input_last = None
 
     def _compute_baseline_h(self, ts: float) -> Optional[float]:
         """일정 시간 동안의 높이 baseline(평균 신장)을 계산합니다."""
@@ -472,6 +482,7 @@ class Level1Engine:
 
         if is_lost:
             self.kp_buffer.append(ts, None)
+            self._maybe_capture_event_window(ts)
             self.present_streak = 0
             self.enter_acc_s = 0.0
             self.posture_acc_s = 0.0
@@ -542,9 +553,12 @@ class Level1Engine:
                 return None
 
             if not is_partial and aspect < self.p.force_abnormal_aspect_th:
+                if self.low_posture_cnt == 0:
+                    self.low_posture_start_ts = ts
                 self.low_posture_cnt += 1
             else:
                 self.low_posture_cnt = 0
+                self.low_posture_start_ts = None
 
             # 자세 변화 지속 시간 누적
             if posture_signal:
@@ -618,6 +632,14 @@ class Level1Engine:
                 self._reset_incident_ai()
                 # 진입을 일으킨 급하강은 NORMAL 분기에서 발생하므로 진입 시점에 따로 기록
                 self.enter_had_drop = (self.last_drop_ts is not None and ts - self.last_drop_ts <= 2.0)
+                self.enter_reason = trigger_reason
+                # 저자세 지속으로 진입했다면 이미 누운 뒤이므로, 저자세가 시작된 시각을 구간 기준으로
+                self.event_anchor_ts = (
+                    self.low_posture_start_ts
+                    if trigger_reason == "low_posture_sustained" and self.low_posture_start_ts is not None
+                    else ts
+                )
+                self.low_posture_start_ts = None
 
                 self.enter_acc_s = 0.0
                 self.posture_acc_s = 0.0
@@ -690,8 +712,7 @@ class Level1Engine:
                 self.still_acc_s = max(0.0, self.still_acc_s - dt * DECAY)
 
             # 진입 후 post_s가 지나면 사건 구간(진입 -pre ~ +post)을 확정해 둠 (이후 승격 시에도 사용)
-            if self.event_window is None and time_since_abnormal >= self.p.event_window_post_s:
-                self._capture_event_window()
+            self._maybe_capture_event_window(ts)
 
             # 진입 직후(2초 이내)의 급하강도 '진입 급하강'으로 인정 (누운 뒤의 bbox 흔들림은 제외)
             if vy is not None and vy > self.p.vy_th and time_since_abnormal <= 2.0:
@@ -852,11 +873,23 @@ class Level1Engine:
 
         return None
 
+    def _maybe_capture_event_window(self, ts: float):
+        """ABNORMAL 진입 후 post_s가 지나면 사건 구간을 한 번 확정합니다. (lost 프레임에서도 호출)"""
+        if (
+            self.state == "ABNORMAL"
+            and self.event_window is None
+            and self.abnormal_start_ts is not None
+            and ts - self.abnormal_start_ts >= self.p.event_window_post_s
+        ):
+            self._capture_event_window()
+
     def _capture_event_window(self):
         if self.abnormal_start_ts is None:
             return
-        t0 = self.abnormal_start_ts
-        self.event_window = self.kp_buffer.window(t0 - self.p.event_window_pre_s, t0 + self.p.event_window_post_s)
+        anchor = self.event_anchor_ts if self.event_anchor_ts is not None else self.abnormal_start_ts
+        self.event_window = self.kp_buffer.window(
+            anchor - self.p.event_window_pre_s, self.abnormal_start_ts + self.p.event_window_post_s
+        )
 
     def _event_window_summary(self) -> Optional[Dict[str, Any]]:
         if self.event_window is None:
@@ -867,14 +900,17 @@ class Level1Engine:
         """
         현재 사건의 분석용 스냅샷 (sidecar 저장용).
         - event_window: ABNORMAL 진입 기준 원시 키포인트 구간 (낙상 동작 포함, 학습/분석용)
-        - ai_input: AI가 실제로 본 30프레임과 시각
+          저자세 지속으로 진입했다면 저자세가 시작된 시각부터 (enter_reason으로 구분)
+        - ai_input: AI가 판정할 때 실제로 본 30프레임과 시각 (승격 이벤트에서도 억제 당시 입력)
         """
         if self.event_window is None:
             self._capture_event_window()
         return {
             "abnormal_start_ts": self.abnormal_start_ts,
+            "enter_reason": self.enter_reason,
+            "event_anchor_ts": self.event_anchor_ts,
             "event_window": self.event_window,
-            "ai_input": {"ts": list(self.kp_ts), "kps": [list(f) for f in self.kp_seq]},
+            "ai_input": self.ai_input_last,
             "ai": self.ai_last,
         }
 
@@ -990,6 +1026,7 @@ class Level1Engine:
             logger.info("[AI UNAVAILABLE] not enough frames. Defaulting to rule-base.")
             return ai
 
+        self.ai_input_last = {"ts": list(self.kp_ts), "kps": [list(f) for f in self.kp_seq]}
         t0 = time.perf_counter()
         try:
             p_fall = self._verifier(list(self.kp_seq))

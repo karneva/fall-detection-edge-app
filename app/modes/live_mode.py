@@ -20,6 +20,9 @@ from ..core.event_sidecar import write_sidecar
 
 logger = logging.getLogger(__name__)
 
+# 억제 클립을 AI 판정 시점까지 늘릴 때의 최대 추가 길이(초)
+SUPPRESSED_CLIP_MAX_EXTRA_S = 20.0
+
 class LiveMode(BaseMode):
     """
     실시간 분석 모드를 담당하는 클래스입니다.
@@ -321,7 +324,11 @@ class LiveMode(BaseMode):
                 abn_ts = float(self.local_incident_ts)
                 t_start = abn_ts - float(CLIP_PRE_SEC)
                 # AI가 실제로 본 구간(억제 시점 직전)까지 포함해야 검수할 수 있음
-                t_end = max(abn_ts + float(CLIP_POST_SEC), float(ev.get("ts", ts_now)))
+                # 단, 클립 인코딩이 처리 루프를 막으므로 길이에 상한을 둠
+                t_end = min(
+                    max(abn_ts + float(CLIP_POST_SEC), float(ev.get("ts", ts_now))),
+                    abn_ts + float(CLIP_POST_SEC) + SUPPRESSED_CLIP_MAX_EXTRA_S,
+                )
 
                 # not_fall 폴더에 저장 (서버 업로드는 하지 않음, 검수 전까지 라벨 미확정)
                 clip_path = self.clip_recorder.save_range(
