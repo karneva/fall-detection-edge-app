@@ -22,6 +22,7 @@
 """
 import argparse
 import dataclasses
+import hashlib
 import json
 import os
 import subprocess
@@ -68,6 +69,33 @@ def _abs_ts(row: Dict[str, Any], key: str, t0: float) -> Optional[float]:
     if row.get(f"{key}_s") is not None:
         return t0 + float(row[f"{key}_s"])
     return None
+
+
+def _sha8_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()[:12]
+
+
+def dataset_fingerprint_labels(labels_path: Path) -> str:
+    """라벨 파일과 그것이 가리키는 모든 obs 파일 내용의 해시. 내용이 바뀌면 결과를 비교하면 안 됨."""
+    h = hashlib.sha256(_sha8_file(labels_path).encode())
+    base = labels_path.parent
+    with open(labels_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                h.update(_sha8_file((base / json.loads(line)["file"]).resolve()).encode())
+    return h.hexdigest()[:12]
+
+
+def dataset_fingerprint_synthetic() -> str:
+    """합성 생성기 코드와 생성 설정의 해시."""
+    h = hashlib.sha256(_sha8_file(Path(__file__).with_name("synth.py")).encode())
+    h.update(json.dumps([SYNTH_FPS, SYNTH_SEEDS, SYNTH_LIE_S]).encode())
+    return h.hexdigest()[:12]
 
 
 def load_labeled_files(labels_path: Path) -> List[Tuple[Truth, List[Dict[str, Any]]]]:
@@ -156,7 +184,18 @@ def _parse_param_overrides(pairs: Iterable[str]) -> Dict[str, Any]:
     return out
 
 
-def build_mode(mode: str, overrides: Dict[str, Any]) -> Tuple[Callable[[], Any], Dict[str, Any]]:
+def _classifier_status() -> Dict[str, Any]:
+    """1D CNN 분류기 상태. numpy/torch가 없어도 예외 없이 disabled로 보고합니다."""
+    try:
+        from app.ai_classifier.inference import get_classifier
+
+        return get_classifier().status()
+    except Exception as e:
+        return {"enabled": False, "load_error": f"import failed: {e!r}"}
+
+
+def build_mode(mode: str, overrides: Dict[str, Any],
+               allow_disabled_ai: bool = False) -> Tuple[Callable[[], Any], Dict[str, Any]]:
     """모드 이름으로 (엔진 생성 함수, 모드 메타)를 만듭니다."""
     from app.core.level1 import Level1Engine, Level1Params
 
@@ -166,13 +205,13 @@ def build_mode(mode: str, overrides: Dict[str, Any]) -> Tuple[Callable[[], Any],
         ai_mode = "off"
     elif mode in ("rules_ai", "shadow"):
         ai_mode = "veto" if mode == "rules_ai" else "shadow"
-        from app.ai_classifier.inference import get_classifier
-
-        clf = get_classifier()
-        meta["classifier"] = clf.status()
-        if not clf.enabled:
-            print(f"[WARN] {mode}: classifier disabled ({clf.load_error}); AI is fail-open, same as rules_only",
-                  file=sys.stderr)
+        status = _classifier_status()
+        meta["classifier"] = status
+        if not status.get("enabled"):
+            msg = f"{mode}: classifier disabled ({status.get('load_error')}); AI is fail-open, same as rules_only"
+            if not allow_disabled_ai:
+                raise SystemExit(f"[ERROR] {msg}. Pass --allow-disabled-ai to run anyway.")
+            print(f"[WARN] {msg}", file=sys.stderr)
     elif mode == "const_fall":
         ai_mode, verifier = "veto", _ConstVerifier(0.9)
     elif mode == "const_adl":
@@ -218,10 +257,11 @@ def evaluate(
     overrides: Dict[str, Any],
     pre_tol_s: float = PRE_TOL_S,
     max_latency_s: float = MAX_LATENCY_S,
+    allow_disabled_ai: bool = False,
 ) -> Dict[str, Any]:
     results: Dict[str, Any] = {}
     for mode in modes:
-        make_engine, meta = build_mode(mode, overrides)
+        make_engine, meta = build_mode(mode, overrides, allow_disabled_ai)
         records = []
         for truth, obs in items:
             events = replay(make_engine, obs)
@@ -282,25 +322,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--max-latency-s", type=float, default=MAX_LATENCY_S)
     ap.add_argument("--name", default=None, help="result name (default: labels file stem or 'synthetic')")
     ap.add_argument("--out", default=None, help="output JSON path (default: runs/eval/<name>_<gitsha>.json)")
-    ap.add_argument("--no-files", action="store_true", help="omit per-file records from the output")
+    ap.add_argument("--no-files", action="store_true",
+                    help="omit per-file records (compare_results then cannot check per-file regressions)")
+    ap.add_argument("--allow-disabled-ai", action="store_true",
+                    help="run rules_ai/shadow even if the classifier failed to load")
     args = ap.parse_args(argv)
 
     if args.synthetic:
         items = synthetic_files()
         default_modes = "rules_only,const_fall,const_adl"
         name = args.name or "synthetic"
-        dataset = {"type": "synthetic", "fps": list(SYNTH_FPS), "seeds": list(SYNTH_SEEDS), "lie_s": SYNTH_LIE_S}
+        dataset = {"type": "synthetic", "fps": list(SYNTH_FPS), "seeds": list(SYNTH_SEEDS), "lie_s": SYNTH_LIE_S,
+                   "fingerprint": dataset_fingerprint_synthetic()}
     else:
         labels_path = Path(args.labels)
         items = load_labeled_files(labels_path)
         default_modes = "rules_only,rules_ai"
         name = args.name or labels_path.stem
-        dataset = {"type": "labels", "labels": str(labels_path)}
+        dataset = {"type": "labels", "labels": str(labels_path),
+                   "fingerprint": dataset_fingerprint_labels(labels_path)}
 
     modes = [m.strip() for m in (args.modes or default_modes).split(",") if m.strip()]
     overrides = _parse_param_overrides(args.param)
 
-    results = evaluate(items, modes, overrides, args.pre_tol_s, args.max_latency_s)
+    results = evaluate(items, modes, overrides, args.pre_tol_s, args.max_latency_s, args.allow_disabled_ai)
     if args.no_files:
         for r in results.values():
             r.pop("files", None)

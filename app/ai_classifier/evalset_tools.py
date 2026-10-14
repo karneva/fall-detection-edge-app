@@ -53,7 +53,7 @@ def validate_rows(
     - 학습 split(train/val)과 평가 split(test/eval_fixed)에 같은 session_id나 subject_id가 있으면 error
       (allow_leak=True면 warning으로 완화)
     - train/val 사이 세션 공유는 warning
-    - check_files_root가 주어지면 file_path 존재 여부를 확인 (상대경로는 이 디렉터리 기준)
+    - check_files_root가 주어지면 file_path 존재 여부를 확인 (상대경로는 이 디렉터리 기준, CLI 기본값은 현재 디렉터리)
     """
     errors: List[str] = []
     warnings: List[str] = []
@@ -159,7 +159,9 @@ def main() -> None:
     p_validate.add_argument("--allow-leak", action="store_true",
                             help="Downgrade train/held-out session/subject overlap to a warning")
     p_validate.add_argument("--check-files", action="store_true",
-                            help="Check that file_path exists (relative to the manifest directory)")
+                            help="Check that file_path exists (relative paths resolve against --root)")
+    p_validate.add_argument("--root", default=".",
+                            help="Base directory for relative file_path (default: current directory, i.e. repo root)")
 
     p_summary = sub.add_parser("summary", help="Print summary statistics for manifest")
     p_summary.add_argument("--manifest", required=True, help="Path to JSONL manifest")
@@ -169,7 +171,7 @@ def main() -> None:
     rows = load_manifest(args.manifest)
 
     if args.command == "validate":
-        root = Path(args.manifest).resolve().parent if args.check_files else None
+        root = Path(args.root).resolve() if args.check_files else None
         errors, warnings = validate_rows(rows, allow_leak=args.allow_leak, check_files_root=root)
         if warnings:
             print("Warnings:")

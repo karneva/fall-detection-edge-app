@@ -1,8 +1,8 @@
 {
  "schema_version": 1,
  "name": "synthetic_v0",
- "git_sha": "8ccd22a",
- "created_at": "2026-10-15T07:52:24",
+ "git_sha": "d87bd71",
+ "created_at": "2026-10-15T08:12:52",
  "dataset": {
   "type": "synthetic",
   "fps": [
@@ -14,7 +14,8 @@
    0,
    1
   ],
-  "lie_s": 90.0
+  "lie_s": 90.0,
+  "fingerprint": "9c40b39f9bfc"
  },
  "scoring": {
   "pre_tol_s": 2.0,
@@ -68,7 +69,10 @@
      "ai_suppress_pfall_th": 0.4,
      "ai_escalate_s": 60.0,
      "ai_escalate_requires_drop": true,
-     "ai_escalate_collapse_s": 3.0
+     "ai_escalate_collapse_s": 3.0,
+     "event_buffer_s": 20.0,
+     "event_window_pre_s": 1.5,
+     "event_window_post_s": 2.5
     }
    },
    "summary": {
@@ -254,7 +258,585 @@
      "missed_after_suppression": 0,
      "detected_by_escalation": 0
     }
-   }
+   },
+   "files": [
+    {
+     "file": "synth/stand_fps10_s0",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps10",
+     "duration_s": 59.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps10_s1",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps10",
+     "duration_s": 59.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps15_s0",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps15",
+     "duration_s": 59.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps15_s1",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps15",
+     "duration_s": 59.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps30_s0",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps30",
+     "duration_s": 59.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps30_s1",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps30",
+     "duration_s": 59.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps10_s0",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps10",
+     "duration_s": 96.9,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 8,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": []
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps10_s1",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps10",
+     "duration_s": 96.9,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 8,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": []
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps15_s0",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps15",
+     "duration_s": 96.933,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 11,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": []
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps15_s1",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps15",
+     "duration_s": 96.933,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 11,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": []
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps30_s0",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps30",
+     "duration_s": 96.967,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 14,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": []
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps30_s1",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps30",
+     "duration_s": 96.967,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 14,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps10_s0",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps10",
+     "duration_s": 17.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps10_s1",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps10",
+     "duration_s": 17.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps15_s0",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps15",
+     "duration_s": 17.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps15_s1",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps15",
+     "duration_s": 17.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps30_s0",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps30",
+     "duration_s": 17.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps30_s1",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps30",
+     "duration_s": 17.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fast_fall_fps10_s0",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 8,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fast_fall_fps10_s1",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 8,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fast_fall_fps15_s0",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 10,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fast_fall_fps15_s1",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 10,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fast_fall_fps30_s0",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 14,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fast_fall_fps30_s1",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 14,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_writhe_fps10_s0",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 9,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_writhe_fps10_s1",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 9,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_writhe_fps15_s0",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 12,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_writhe_fps15_s1",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 13,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_writhe_fps30_s0",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 17,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_writhe_fps30_s1",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 17,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps10_s0",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps10",
+     "duration_s": 34.9,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps10_s1",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps10",
+     "duration_s": 34.9,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps15_s0",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps15",
+     "duration_s": 34.933,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps15_s1",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps15",
+     "duration_s": 34.933,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps30_s0",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps30",
+     "duration_s": 34.967,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps30_s1",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps30",
+     "duration_s": 34.967,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    }
+   ]
   },
   "const_fall": {
    "meta": {
@@ -302,7 +884,10 @@
      "ai_suppress_pfall_th": 0.4,
      "ai_escalate_s": 60.0,
      "ai_escalate_requires_drop": true,
-     "ai_escalate_collapse_s": 3.0
+     "ai_escalate_collapse_s": 3.0,
+     "event_buffer_s": 20.0,
+     "event_window_pre_s": 1.5,
+     "event_window_post_s": 2.5
     }
    },
    "summary": {
@@ -488,7 +1073,777 @@
      "missed_after_suppression": 0,
      "detected_by_escalation": 0
     }
-   }
+   },
+   "files": [
+    {
+     "file": "synth/stand_fps10_s0",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps10",
+     "duration_s": 59.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps10_s1",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps10",
+     "duration_s": 59.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps15_s0",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps15",
+     "duration_s": 59.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps15_s1",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps15",
+     "duration_s": 59.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps30_s0",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps30",
+     "duration_s": 59.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps30_s1",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps30",
+     "duration_s": 59.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps10_s0",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps10",
+     "duration_s": 96.9,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 8,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps10_s1",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps10",
+     "duration_s": 96.9,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 8,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps15_s0",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps15",
+     "duration_s": 96.933,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 11,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 8.066666666666606
+      }
+     ]
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps15_s1",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps15",
+     "duration_s": 96.933,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 11,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 8.066666666666606
+      }
+     ]
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps30_s0",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps30",
+     "duration_s": 96.967,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 14,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps30_s1",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps30",
+     "duration_s": 96.967,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 14,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 1,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_then_recover_fps10_s0",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps10",
+     "duration_s": 17.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps10_s1",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps10",
+     "duration_s": 17.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps15_s0",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps15",
+     "duration_s": 17.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps15_s1",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps15",
+     "duration_s": 17.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps30_s0",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps30",
+     "duration_s": 17.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps30_s1",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps30",
+     "duration_s": 17.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fast_fall_fps10_s0",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 8,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fast_fall_fps10_s1",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 8,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fast_fall_fps15_s0",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 10,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fast_fall_fps15_s1",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 10,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fast_fall_fps30_s0",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 14,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fast_fall_fps30_s1",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 14,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps10_s0",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 9,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "abnormal_timeout",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps10_s1",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 9,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "abnormal_timeout",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps15_s0",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 12,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "abnormal_timeout",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps15_s1",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 13,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "abnormal_timeout",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps30_s0",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 17,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "abnormal_timeout",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps30_s1",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 17,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "abnormal_timeout",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "abnormal_timeout",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps10_s0",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps10",
+     "duration_s": 34.9,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps10_s1",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps10",
+     "duration_s": 34.9,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.0,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps15_s0",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps15",
+     "duration_s": 34.933,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps15_s1",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps15",
+     "duration_s": 34.933,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps30_s0",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps30",
+     "duration_s": 34.967,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps30_s1",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps30",
+     "duration_s": 34.967,
+     "n_level1": 1,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 10.033,
+     "detected_reason": "still_for_sustain_s",
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "level1",
+       "reason": "still_for_sustain_s",
+       "decision": "fall",
+       "p_fall": 0.9,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    }
+   ]
   },
   "const_adl": {
    "meta": {
@@ -536,7 +1891,10 @@
      "ai_suppress_pfall_th": 0.4,
      "ai_escalate_s": 60.0,
      "ai_escalate_requires_drop": true,
-     "ai_escalate_collapse_s": 3.0
+     "ai_escalate_collapse_s": 3.0,
+     "event_buffer_s": 20.0,
+     "event_window_pre_s": 1.5,
+     "event_window_post_s": 2.5
     }
    },
    "summary": {
@@ -722,7 +2080,861 @@
      "missed_after_suppression": 2,
      "detected_by_escalation": 4
     }
-   }
+   },
+   "files": [
+    {
+     "file": "synth/stand_fps10_s0",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps10",
+     "duration_s": 59.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps10_s1",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps10",
+     "duration_s": 59.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps15_s0",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps15",
+     "duration_s": 59.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps15_s1",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps15",
+     "duration_s": 59.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps30_s0",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps30",
+     "duration_s": 59.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/stand_fps30_s1",
+     "label": "adl",
+     "scenario": "stand",
+     "source": "synthetic_fps30",
+     "duration_s": 59.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 0,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps10_s0",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps10",
+     "duration_s": 96.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps10_s1",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps10",
+     "duration_s": 96.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps15_s0",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps15",
+     "duration_s": 96.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.066666666666606
+      }
+     ]
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps15_s1",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps15",
+     "duration_s": 96.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.066666666666606
+      }
+     ]
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps30_s0",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps30",
+     "duration_s": 96.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/lie_on_bed_slow_fps30_s1",
+     "label": "adl",
+     "scenario": "lie_on_bed_slow",
+     "source": "synthetic_fps30",
+     "duration_s": 96.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_then_recover_fps10_s0",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps10",
+     "duration_s": 17.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps10_s1",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps10",
+     "duration_s": 17.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps15_s0",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps15",
+     "duration_s": 17.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps15_s1",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps15",
+     "duration_s": 17.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps30_s0",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps30",
+     "duration_s": 17.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fall_then_recover_fps30_s1",
+     "label": "adl",
+     "scenario": "fall_then_recover",
+     "source": "synthetic_fps30",
+     "duration_s": 17.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 0,
+     "n_abnormal_enter": 1,
+     "detected": null,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": false,
+     "false_alarms": 0,
+     "ai": []
+    },
+    {
+     "file": "synth/fast_fall_fps10_s0",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.0,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fast_fall_fps10_s1",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.0,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fast_fall_fps15_s0",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.033,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fast_fall_fps15_s1",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.033,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fast_fall_fps30_s0",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.033,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fast_fall_fps30_s1",
+     "label": "fall",
+     "scenario": "fast_fall",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.033,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps10_s0",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.0,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "abnormal_timeout",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps10_s1",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps10",
+     "duration_s": 93.4,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.0,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "abnormal_timeout",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps15_s0",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.033,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "abnormal_timeout",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps15_s1",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps15",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.033,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "abnormal_timeout",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps30_s0",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.033,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "abnormal_timeout",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_writhe_fps30_s1",
+     "label": "fall",
+     "scenario": "fall_writhe",
+     "source": "synthetic_fps30",
+     "duration_s": 93.467,
+     "n_level1": 1,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": true,
+     "latency_s": 70.033,
+     "detected_reason": "escalated_after_ai_suppression",
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "abnormal_timeout",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      },
+      {
+       "event": "level1",
+       "reason": "escalated_after_ai_suppression",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps10_s0",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps10",
+     "duration_s": 34.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": false,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps10_s1",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps10",
+     "duration_s": 34.9,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": false,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 7.100000000000023
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps15_s0",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps15",
+     "duration_s": 34.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": false,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps15_s1",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps15",
+     "duration_s": 34.933,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": false,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 8.06666666666672
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps30_s0",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps30",
+     "duration_s": 34.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": false,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    },
+    {
+     "file": "synth/fall_lie_then_get_up_fps30_s1",
+     "label": "fall",
+     "scenario": "fall_lie_then_get_up",
+     "source": "synthetic_fps30",
+     "duration_s": 34.967,
+     "n_level1": 0,
+     "n_ai_suppressed": 1,
+     "n_abnormal_enter": 1,
+     "detected": false,
+     "latency_s": null,
+     "detected_reason": null,
+     "suppressed_in_window": true,
+     "false_alarms": 0,
+     "ai": [
+      {
+       "event": "ai_suppressed",
+       "reason": "still_for_sustain_s",
+       "decision": "adl",
+       "p_fall": 0.05,
+       "window_offset_from_abnormal_s": 9.033333333333417
+      }
+     ]
+    }
+   ]
   }
  }
 }

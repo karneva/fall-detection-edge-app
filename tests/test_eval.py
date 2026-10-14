@@ -116,6 +116,17 @@ class ReplayEvalTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             replay_eval._parse_param_overrides(["nope=1"])
 
+    def test_disabled_classifier_rejected_unless_allowed(self):
+        from unittest import mock
+
+        items = replay_eval.synthetic_files()[:1]
+        off = {"enabled": False, "load_error": "no weights"}
+        with mock.patch.object(replay_eval, "_classifier_status", return_value=off):
+            with self.assertRaises(SystemExit):
+                replay_eval.evaluate(items, ["rules_ai"], {})
+            res = replay_eval.evaluate(items, ["shadow"], {}, allow_disabled_ai=True)
+        self.assertFalse(res["shadow"]["meta"]["classifier"]["enabled"])
+
     def test_cli_synthetic_writes_result(self):
         out = self.dir / "r.json"
         rc = replay_eval.main(["--synthetic", "--modes", "rules_only", "--out", str(out), "--no-files"])
@@ -149,6 +160,46 @@ class CompareResultsTest(unittest.TestCase):
         self.assertEqual(len(compare_results.check_rules(self.BASE, c)), 1)
         self.assertEqual(compare_results.check_rules(self.BASE, c, allow_fa_increase=True), [])
 
+    def test_reject_missing_mode_and_no_overlap(self):
+        c = {"name": "c", "dataset": {}, "modes": {"shadow": copy.deepcopy(self.BASE["modes"]["rules_only"])}}
+        v = compare_results.check_rules(self.BASE, c)
+        self.assertTrue(any("missing from candidate" in x for x in v))
+        self.assertTrue(any("no common modes" in x for x in v))
+
+    def test_reject_metric_becoming_none(self):
+        v = compare_results.check_rules(self.BASE, self.cand(recall=None, fa_per_hour=None))
+        self.assertEqual(len(v), 2)
+
+    def test_reject_dataset_or_scoring_mismatch(self):
+        b = copy.deepcopy(self.BASE)
+        b.update(dataset={"fingerprint": "aaa"}, scoring={"pre_tol_s": 2.0, "max_latency_s": 120.0})
+        c = copy.deepcopy(b)
+        c.update(dataset={"fingerprint": "bbb"}, scoring={"pre_tol_s": 2.0, "max_latency_s": 300.0})
+        self.assertEqual(len(compare_results.check_rules(b, c)), 2)
+        self.assertEqual(compare_results.check_rules(b, c, allow_dataset_mismatch=True), [])
+
+    def test_reject_newly_missed_fall_even_if_recall_same(self):
+        b = copy.deepcopy(self.BASE)
+        b["modes"]["rules_only"]["files"] = [
+            {"file": "A", "label": "fall", "detected": True},
+            {"file": "B", "label": "fall", "detected": False},
+        ]
+        c = copy.deepcopy(b)
+        c["modes"]["rules_only"]["files"] = [
+            {"file": "A", "label": "fall", "detected": False},
+            {"file": "B", "label": "fall", "detected": True},
+        ]
+        v = compare_results.check_rules(b, c)
+        self.assertEqual(v, ["rules_only: newly missed fall: A"])
+
+    def test_reject_classifier_enabled_mismatch(self):
+        b = copy.deepcopy(self.BASE)
+        b["modes"]["rules_only"]["meta"] = {"classifier": {"enabled": True, "weights_hash": "x"}}
+        c = copy.deepcopy(b)
+        c["modes"]["rules_only"]["meta"] = {"classifier": {"enabled": False}}
+        self.assertEqual(len(compare_results.check_rules(b, c)), 1)
+        self.assertTrue(compare_results.param_diffs(b, c))
+
 
 class SyntheticBaselineTest(unittest.TestCase):
     def test_committed_baseline_still_holds(self):
@@ -158,7 +209,14 @@ class SyntheticBaselineTest(unittest.TestCase):
             self.skipTest("baseline not generated")
         base = json.loads(base_path.read_text(encoding="utf-8"))
         modes = list(base["modes"])
-        cand = {"modes": replay_eval.evaluate(replay_eval.synthetic_files(), modes, base.get("param_overrides", {}))}
+        # 환경변수(AI_ESCALATE_S 등)에 따라 기본값이 바뀌지 않도록 baseline 당시 파라미터로 고정
+        params = dict(base["modes"][modes[0]]["meta"]["params"])
+        params.pop("ai_mode")
+        cand = {
+            "dataset": {"fingerprint": replay_eval.dataset_fingerprint_synthetic()},
+            "scoring": base["scoring"],
+            "modes": replay_eval.evaluate(replay_eval.synthetic_files(), modes, params),
+        }
         self.assertEqual(compare_results.check_rules(base, cand), [])
 
 
