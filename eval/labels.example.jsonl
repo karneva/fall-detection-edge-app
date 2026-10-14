@@ -1,0 +1,5 @@
+# replay_eval 라벨 예시: 한 줄 = 녹화된 obs 파일 하나 (/record/start ~ /record/stop)
+# file은 이 파일 기준 상대경로, 시각은 파일 첫 프레임 기준 초(fall_start_s) 또는 절대 ts(fall_start_ts)
+{"file": "../runs/obs_20261014_101010.jsonl", "label": "fall", "fall_start_s": 12.3, "fall_end_s": 13.0, "scenario": "fast_fall", "source": "custom", "subject_id": "custom-s01", "session_id": "custom-20261014-livingroom"}
+{"file": "../runs/obs_20261014_102000.jsonl", "label": "adl", "scenario": "lie_on_bed", "source": "custom", "subject_id": "custom-s01", "session_id": "custom-20261014-bedroom"}
+{"file": "../runs/obs_20261014_103000.jsonl", "label": "adl", "scenario": "sit_down_fast", "source": "custom", "subject_id": "custom-s02", "session_id": "custom-20261014-livingroom"}

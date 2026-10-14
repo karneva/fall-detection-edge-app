@@ -2,7 +2,7 @@ import argparse
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 
 REQUIRED_FIELDS = [
@@ -18,6 +18,10 @@ REQUIRED_FIELDS = [
 
 ALLOWED_SPLITS = {"train", "val", "test", "eval_fixed"}
 ALLOWED_LABELS = {"fall", "adl"}
+
+# 학습에 쓰는 split과 평가에 쓰는 split. 둘 사이에 세션/사람이 겹치면 누수
+TRAIN_SPLITS = {"train", "val"}
+HELDOUT_SPLITS = {"test", "eval_fixed"}
 
 
 def load_manifest(path: str) -> List[Dict]:
@@ -38,13 +42,26 @@ def load_manifest(path: str) -> List[Dict]:
     return rows
 
 
-def validate_rows(rows: Iterable[Dict]) -> Tuple[List[str], List[str]]:
+def validate_rows(
+    rows: Iterable[Dict],
+    allow_leak: bool = False,
+    check_files_root: Optional[Path] = None,
+) -> Tuple[List[str], List[str]]:
+    """
+    manifest 행을 검증합니다.
+
+    - 학습 split(train/val)과 평가 split(test/eval_fixed)에 같은 session_id나 subject_id가 있으면 error
+      (allow_leak=True면 warning으로 완화)
+    - train/val 사이 세션 공유는 warning
+    - check_files_root가 주어지면 file_path 존재 여부를 확인 (상대경로는 이 디렉터리 기준)
+    """
     errors: List[str] = []
     warnings: List[str] = []
 
     seen_ids = set()
     seen_paths = set()
     split_session_index = defaultdict(set)
+    split_subject_index = defaultdict(set)
 
     for row in rows:
         where = f"line {row.get('_lineno', '?')}"
@@ -72,16 +89,27 @@ def validate_rows(rows: Iterable[Dict]) -> Tuple[List[str], List[str]]:
             if file_path in seen_paths:
                 warnings.append(f"{where}: duplicate file_path '{file_path}'")
             seen_paths.add(file_path)
+            if check_files_root is not None:
+                fp = Path(file_path)
+                if not fp.is_absolute():
+                    fp = check_files_root / fp
+                if not fp.exists():
+                    errors.append(f"{where}: file not found '{file_path}'")
 
         session_id = row.get("session_id")
         if split and session_id:
             split_session_index[session_id].add(split)
+        subject_id = row.get("subject_id")
+        if split and subject_id:
+            split_subject_index[subject_id].add(split)
 
-    for session_id, splits in split_session_index.items():
-        if len(splits) > 1:
-            warnings.append(
-                f"session_id '{session_id}' appears in multiple splits: {sorted(splits)}"
-            )
+    for kind, index in (("session_id", split_session_index), ("subject_id", split_subject_index)):
+        for key, splits in sorted(index.items()):
+            if splits & TRAIN_SPLITS and splits & HELDOUT_SPLITS:
+                msg = f"{kind} '{key}' leaks between training and held-out splits: {sorted(splits)}"
+                (warnings if allow_leak else errors).append(msg)
+            elif kind == "session_id" and len(splits) > 1:
+                warnings.append(f"session_id '{key}' appears in multiple splits: {sorted(splits)}")
 
     return errors, warnings
 
@@ -94,6 +122,7 @@ def summarize_rows(rows: Iterable[Dict]) -> Dict[str, Counter]:
         "scenario": Counter(),
         "split_label": Counter(),
         "split_source": Counter(),
+        "scenario_label": Counter(),
     }
 
     for row in rows:
@@ -108,12 +137,13 @@ def summarize_rows(rows: Iterable[Dict]) -> Dict[str, Counter]:
         counters["scenario"][scenario] += 1
         counters["split_label"][f"{split}:{label}"] += 1
         counters["split_source"][f"{split}:{source}"] += 1
+        counters["scenario_label"][f"{scenario}:{label}"] += 1
 
     return counters
 
 
 def print_summary(summary: Dict[str, Counter]) -> None:
-    for key in ["split", "label", "source", "scenario", "split_label", "split_source"]:
+    for key in ["split", "label", "source", "scenario", "split_label", "split_source", "scenario_label"]:
         print(f"[{key}]")
         for name, count in sorted(summary[key].items()):
             print(f"  {name}: {count}")
@@ -126,6 +156,10 @@ def main() -> None:
 
     p_validate = sub.add_parser("validate", help="Validate manifest format and split hygiene")
     p_validate.add_argument("--manifest", required=True, help="Path to JSONL manifest")
+    p_validate.add_argument("--allow-leak", action="store_true",
+                            help="Downgrade train/held-out session/subject overlap to a warning")
+    p_validate.add_argument("--check-files", action="store_true",
+                            help="Check that file_path exists (relative to the manifest directory)")
 
     p_summary = sub.add_parser("summary", help="Print summary statistics for manifest")
     p_summary.add_argument("--manifest", required=True, help="Path to JSONL manifest")
@@ -135,7 +169,8 @@ def main() -> None:
     rows = load_manifest(args.manifest)
 
     if args.command == "validate":
-        errors, warnings = validate_rows(rows)
+        root = Path(args.manifest).resolve().parent if args.check_files else None
+        errors, warnings = validate_rows(rows, allow_leak=args.allow_leak, check_files_root=root)
         if warnings:
             print("Warnings:")
             for item in warnings:
