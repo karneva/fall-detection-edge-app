@@ -1,0 +1,6 @@
+# 개발/테스트용 의존성
+# 룰 엔진 테스트(tests/test_level1_safety.py)는 표준 라이브러리만으로 실행됩니다.
+# 분류기 테스트는 numpy가 없으면 skip, torch가 없으면 로드 테스트만 skip됩니다.
+numpy
+pytest
+# torch  # 선택: 분류기 로드/추론 테스트까지 실행하려면 설치

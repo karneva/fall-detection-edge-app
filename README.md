@@ -213,13 +213,25 @@ AI 분류기가 `ADL`로 판정하면 규칙 기반 탐지를 억제하고 `ai_s
 │   ├── config.py           # 환경 변수 기반 설정
 │   └── main.py             # FastAPI 엔트리포인트
 ├── docs/                   # 상세 기술 문서
+├── tests/                  # 합성 시나리오 기반 회귀 테스트 (unittest)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
+├── requirements-dev.txt    # 테스트용 의존성
 ├── benchmark_models.py     # 모델 벤치마크 도구
 ├── export_tensorrt.py      # TensorRT 변환 스크립트
-├── test_confidence.py      # 낙상 신뢰도 로직 테스트
 └── test_token_refresh.py   # 토큰 갱신 로직 테스트
+```
+
+### 테스트 실행
+
+```bash
+# 룰 엔진/AI 게이트 테스트는 표준 라이브러리만으로 동작 (numpy/torch 테스트는 자동 skip)
+python -m unittest discover -s tests -t . -v
+
+# 분류기 테스트까지 실행
+pip install -r requirements-dev.txt   # (+ torch)
+pytest tests -q
 ```
 
 ## 실행 환경
