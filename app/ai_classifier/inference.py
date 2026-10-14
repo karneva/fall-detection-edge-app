@@ -1,27 +1,69 @@
-import torch
+import logging
+import time
+from typing import Any, Dict, Optional, Tuple
+
 import numpy as np
-import os
-from app.ai_classifier.model import Fall1DCNN
+
+from app.ai_classifier.weights_resolver import resolve_weights_path, sha256_8
+
+logger = logging.getLogger(__name__)
+
 
 class FallClassifier:
-    def __init__(self, model_path="app/ai_classifier/weights/fall_model_active_best.pth", threshold=0.6, device=None):
-        if device is None:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            self.device = device
-            
-        self.model = Fall1DCNN().to(self.device)
+    """
+    2차 검증용 1D CNN 분류기 래퍼.
+
+    가중치가 없거나 로드에 실패하면 enabled=False가 되고 모든 예측이 None을 반환합니다.
+    (초기화되지 않은 랜덤 모델로 알람을 억제하는 일이 없도록 fail-open)
+    """
+
+    def __init__(self, model_path: Optional[str] = None, threshold: float = 0.6, device=None):
+        self.enabled = False
+        self.model = None
+        self.model_path: Optional[str] = None
+        self.weights_hash: Optional[str] = None
+        self.load_error: Optional[str] = None
         self.threshold = threshold
-        
-        if os.path.exists(model_path):
-            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
-            print(f"Loaded AI classifier model from {model_path} (threshold={threshold})")
-        else:
-            print(f"Warning: Model weights not found at {model_path}. Using uninitialized model.")
-            
-        self.model.eval()
         self.seq_len = 30
-        
+        self.device = None
+        self._torch = None
+
+        try:
+            import torch
+            from app.ai_classifier.model import Fall1DCNN
+        except Exception as e:
+            self.load_error = f"import failed: {e!r}"
+            logger.error(f"[AI] classifier DISABLED ({self.load_error}) -> rule-based result stands")
+            return
+
+        path = resolve_weights_path(model_path)
+        if path is None:
+            self.load_error = f"weights not found (model_path={model_path!r})"
+            logger.error(f"[AI] classifier DISABLED: {self.load_error} -> rule-based result stands")
+            return
+
+        try:
+            self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            model = Fall1DCNN().to(self.device)
+            try:
+                state = torch.load(path, map_location=self.device, weights_only=True)
+            except TypeError:
+                # weights_only 인자를 지원하지 않는 구버전 torch
+                state = torch.load(path, map_location=self.device)
+            model.load_state_dict(state, strict=True)
+            model.eval()
+        except Exception as e:
+            self.load_error = f"load failed: {e!r}"
+            logger.error(f"[AI] classifier DISABLED: {self.load_error} ({path}) -> rule-based result stands")
+            return
+
+        self.model = model
+        self._torch = torch
+        self.model_path = path
+        self.weights_hash = sha256_8(path)
+        self.enabled = True
+        logger.info(f"[AI] Loaded classifier {path} (sha256={self.weights_hash}, threshold={threshold})")
+
     def normalize_sequence(self, sequence):
         """
         시퀀스의 각 프레임에 대해 골반 중심 정규화 적용.
@@ -33,7 +75,7 @@ class FallClassifier:
             # 11: Left Hip, 12: Right Hip
             l_hip = kps[11]
             r_hip = kps[12]
-            
+
             if np.any(l_hip) and np.any(r_hip):
                 origin = (l_hip + r_hip) / 2
             elif np.any(l_hip):
@@ -42,48 +84,103 @@ class FallClassifier:
                 origin = r_hip
             else:
                 origin = kps[0] if np.any(kps[0]) else np.array([0.5, 0.5])
-            
+
             norm_frame = (kps - origin).flatten()
             norm_seq.append(norm_frame)
         return np.array(norm_seq, dtype=np.float32)
 
-    def predict(self, keypoint_sequence):
+    def predict_proba(self, keypoint_sequence) -> Optional[float]:
         """
-        keypoint_sequence: List of 30 frames, each frame is 34-dim array
+        낙상 확률 p_fall(0~1)을 반환합니다.
+        분류기가 비활성이거나, 프레임이 부족하거나, 추론 중 오류가 나면 None.
+        """
+        if not self.enabled:
+            return None
+        frames = list(keypoint_sequence)
+        if len(frames) < self.seq_len:
+            return None
+        try:
+            torch = self._torch
+            seq_np = np.asarray(frames[-self.seq_len:], dtype=np.float32)
+            seq_np = self.normalize_sequence(seq_np)  # (30, 34)
+            # [30, 34] -> [1, 34, 30] (Batch, Channel, Length)
+            seq_np = np.transpose(seq_np, (1, 0))
+            seq_tensor = torch.from_numpy(np.ascontiguousarray(seq_np)).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                probs = torch.softmax(self.model(seq_tensor), dim=1)
+            return float(probs[0, 1].item())
+        except Exception:
+            logger.exception("[AI] predict_proba failed")
+            return None
+
+    def predict(self, keypoint_sequence) -> Tuple[Optional[int], float]:
+        """
+        기존 호환 API.
         Returns:
-            label: 1 for Fall, 0 for ADL, None if uncertain
+            label: 1 for Fall, 0 for ADL, None if uncertain/unavailable
             confidence: float
         """
-        if len(keypoint_sequence) < self.seq_len:
+        p = self.predict_proba(keypoint_sequence)
+        if p is None:
             return None, 0.0
-            
-        # 정규화 적용
-        seq_np = np.array(keypoint_sequence, dtype=np.float32)
-        seq_np = self.normalize_sequence(seq_np) # (30, 34)
-        
-        # [30, 34] -> [1, 34, 30] (Batch, Channel, Length)
-        seq_np = np.transpose(seq_np, (1, 0))
-        seq_tensor = torch.from_numpy(seq_np).unsqueeze(0).to(self.device)
-        
-        with torch.no_grad():
-            outputs = self.model(seq_tensor)
-            probs = torch.softmax(outputs, dim=1)
-            confidence, predicted = torch.max(probs, 1)
-            
-        conf_val = confidence.item()
-        label_val = predicted.item()
-        
+        label = 1 if p >= 0.5 else 0
+        conf = max(p, 1.0 - p)
         # 신뢰도 임계값 체크
-        if conf_val < self.threshold:
-            return None, conf_val # 불확실하면 판단 보류 (Rule-based 따르기)
-            
-        return label_val, conf_val
+        if conf < self.threshold:
+            return None, conf  # 불확실하면 판단 보류 (Rule-based 따르기)
+        return label, conf
+
+    def warmup(self) -> Optional[float]:
+        """첫 추론 지연을 미리 소모합니다. 소요 시간(ms)을 반환하고, 비활성이면 None."""
+        if not self.enabled:
+            return None
+        t0 = time.perf_counter()
+        self.predict_proba([[0.0] * 34] * self.seq_len)
+        return (time.perf_counter() - t0) * 1000.0
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "model_path": self.model_path,
+            "weights_hash": self.weights_hash,
+            "load_error": self.load_error,
+            "threshold": self.threshold,
+        }
+
+
+class _DisabledClassifier(FallClassifier):
+    """FallClassifier 생성 자체가 실패했을 때 쓰는 비활성 대체 객체."""
+
+    def __init__(self, reason: str):
+        self.enabled = False
+        self.model = None
+        self.model_path = None
+        self.weights_hash = None
+        self.load_error = reason
+        self.threshold = 0.6
+        self.seq_len = 30
+        self.device = None
+        self._torch = None
+
 
 # Singleton instance
 _classifier = None
 
-def get_classifier():
+
+def get_classifier() -> FallClassifier:
+    """분류기 싱글턴을 반환합니다. 예외를 던지지 않습니다."""
     global _classifier
     if _classifier is None:
-        _classifier = FallClassifier()
+        try:
+            from app.config import AI_MODEL_PATH
+            _classifier = FallClassifier(model_path=AI_MODEL_PATH or None)
+        except Exception as e:
+            logger.exception("[AI] classifier init failed")
+            _classifier = _DisabledClassifier(f"init failed: {e!r}")
     return _classifier
+
+
+def reset_classifier():
+    """테스트용: 싱글턴을 초기화합니다."""
+    global _classifier
+    _classifier = None

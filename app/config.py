@@ -100,6 +100,20 @@ CLIP_COOLDOWN_S = float(os.getenv("CLIP_COOLDOWN_S", "30.0"))
 ABNORMAL_TIMEOUT_S = float(os.getenv("ABNORMAL_TIMEOUT_S", "10.0"))
 
 # ---------------------------------------------------------
+# AI 2차 검증(1D CNN) 설정
+# ---------------------------------------------------------
+# veto: AI가 ADL로 판정하면 알람 억제 / shadow: 판정만 기록 / off: 호출 안 함
+AI_MODE = os.getenv("AI_MODE", "veto").strip().lower()
+# 분류기 가중치 경로 (비우면 app/ai_classifier/weights/ 아래 기본 파일 탐색)
+AI_MODEL_PATH = os.getenv("AI_MODEL_PATH", "").strip()
+# p_fall이 이 값 이하일 때만 억제 (0.4 = 기존 'ADL & conf>=0.6' 조건과 동치)
+AI_SUPPRESS_PFALL_TH = float(os.getenv("AI_SUPPRESS_PFALL_TH", "0.4"))
+# AI 억제 후에도 붕괴 상태가 이 시간 이상 이어지면 AI와 무관하게 알람 승격
+AI_ESCALATE_S = float(os.getenv("AI_ESCALATE_S", "60.0"))
+# 승격에 ABNORMAL 진입 시점의 급하강 신호를 요구할지 여부
+AI_ESCALATE_REQUIRES_DROP = _env_flag("AI_ESCALATE_REQUIRES_DROP", True)
+
+# ---------------------------------------------------------
 # EMA(Exponential Moving Average) 스무딩 설정
 # ---------------------------------------------------------
 KP_EMA_ENABLE = os.getenv("KP_EMA_ENABLE", "1") == "1"
