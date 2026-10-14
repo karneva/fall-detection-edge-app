@@ -7,6 +7,7 @@ import time
 import logging
 import cv2
 import os
+import dataclasses
 from typing import Optional, Tuple, Dict, Any
 
 from .base_mode import BaseMode
@@ -14,7 +15,8 @@ from ..engine import LivePipeline
 from ..core import Level1Params, Level1Engine, PresenceParams, PresenceEngine, ClipRecorder
 from ..api.server_client import ServerClient
 from ..state.device_state import get_device_state
-from ..config import JPEG_QUALITY, DEVICE_ID, LOCATION_ID
+from ..config import JPEG_QUALITY, DEVICE_ID, LOCATION_ID, EVENTS_DIR, SAVE_EVENT_SIDECAR
+from ..core.event_sidecar import write_sidecar
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +57,11 @@ class LiveMode(BaseMode):
         # 내부 상태 변수
         self.last_level1_event: Optional[Dict[str, Any]] = None
         self.local_incident_ts: Optional[float] = None
-    
+
+        # 실측 처리 FPS (obs 간격의 EMA)
+        self._last_obs_ts: Optional[float] = None
+        self._fps_ema: Optional[float] = None
+
     def setup(self) -> bool:
         """분석 파이프라인 및 엔진 상태를 초기화합니다."""
         try:
@@ -119,8 +125,43 @@ class LiveMode(BaseMode):
         return {
             "last_level1_event": self.last_level1_event,
             "ai_classifier": self._classifier_status(),
+            "processing_fps": round(self._fps_ema, 2) if self._fps_ema else None,
             **st
         }
+
+    def _update_fps(self, ts: float):
+        if self._last_obs_ts is not None:
+            dt = ts - self._last_obs_ts
+            if 0.0 < dt < 2.0:
+                inst = 1.0 / dt
+                self._fps_ema = inst if self._fps_ema is None else (0.95 * self._fps_ema + 0.05 * inst)
+        self._last_obs_ts = ts
+
+    def _save_sidecar(self, ev: Dict[str, Any], clip_path: Optional[str], clip_range) -> Optional[str]:
+        """판정 근거(사건 구간 키포인트, AI 입력, 파라미터 등)를 sidecar JSON으로 저장합니다."""
+        if not SAVE_EVENT_SIDECAR:
+            return None
+        try:
+            snapshot = self.level1_engine.get_incident_snapshot()
+            params = dataclasses.asdict(self.level1_engine.p)
+        except Exception:
+            logger.exception("[SIDECAR] failed to collect incident snapshot")
+            snapshot, params = None, None
+        path = write_sidecar(
+            EVENTS_DIR,
+            ev,
+            device_id=DEVICE_ID,
+            location_id=LOCATION_ID,
+            snapshot=snapshot,
+            params=params,
+            processing_fps=self._fps_ema,
+            classifier=self._classifier_status(),
+            clip={"path": clip_path, "t_start": clip_range[0] if clip_range else None,
+                  "t_end": clip_range[1] if clip_range else None},
+        )
+        if path:
+            logger.info(f"[SIDECAR] saved {path}")
+        return path
 
     def step(self) -> Tuple[Optional[Dict[str, Any]], Optional[bytes], Optional[Any], Optional[Any]]:
         """
@@ -137,6 +178,7 @@ class LiveMode(BaseMode):
             return None, overlay_jpg, raw_frame, None
 
         ts_now = float(obs["ts"])
+        self._update_fps(ts_now)
 
         # 1. 재실 이벤트 처리
         pe = self.presence_engine.step(obs)
@@ -231,7 +273,9 @@ class LiveMode(BaseMode):
                     logger.error(f"Failed to send to Server: {e}")
 
             # C. 사고 전후 영상 추출 및 서버 업로드
-            if self.local_incident_ts is not None:
+            if self.local_incident_ts is None:
+                self._save_sidecar(ev, None, None)
+            else:
                 from ..config import CLIP_PRE_SEC, CLIP_POST_SEC
 
                 abn_ts = float(self.local_incident_ts)
@@ -244,6 +288,7 @@ class LiveMode(BaseMode):
                     filename_prefix="incident",
                     subdir="fall"
                 )
+                self._save_sidecar(ev, clip_path, (t_start, t_end))
 
                 if clip_path and presigned_url and video_path:
                     logger.info(f"Uploading clip: {clip_path} -> {video_path}")
@@ -269,18 +314,22 @@ class LiveMode(BaseMode):
         # AI에 의해 반려된 오탐 의심 사례 저장 (Active Learning용)
         elif et == "ai_suppressed":
             logger.info(f"[AI SUPPRESSED RECORDING] {ev}")
-            if self.local_incident_ts is not None:
+            if self.local_incident_ts is None:
+                self._save_sidecar(ev, None, None)
+            else:
                 from ..config import CLIP_PRE_SEC, CLIP_POST_SEC
                 abn_ts = float(self.local_incident_ts)
                 t_start = abn_ts - float(CLIP_PRE_SEC)
-                t_end = abn_ts + float(CLIP_POST_SEC)
+                # AI가 실제로 본 구간(억제 시점 직전)까지 포함해야 검수할 수 있음
+                t_end = max(abn_ts + float(CLIP_POST_SEC), float(ev.get("ts", ts_now)))
 
-                # not_fall 폴더에 저장 (서버 업로드는 하지 않음)
-                self.clip_recorder.save_range(
+                # not_fall 폴더에 저장 (서버 업로드는 하지 않음, 검수 전까지 라벨 미확정)
+                clip_path = self.clip_recorder.save_range(
                     t_start=t_start,
                     t_end=t_end,
                     filename_prefix="suppressed",
                     subdir="not_fall"
                 )
+                self._save_sidecar(ev, clip_path, (t_start, t_end))
             # 사건은 끝나지 않았음 (억제 후 감시 중): 이후 승격된 level1도 같은 사건 시점으로 클립을 저장하도록
             # local_incident_ts를 유지. 회복(abnormal_exit) 또는 level1 처리 시 초기화됨.

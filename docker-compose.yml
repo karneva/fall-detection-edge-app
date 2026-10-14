@@ -37,6 +37,8 @@ services:
       - ENABLE_DEVICE_PAIRING=${ENABLE_DEVICE_PAIRING:-0}
       - RUNS_DIR=${RUNS_DIR:-/app/runs}
       - CLIP_DIR=${CLIP_DIR:-/app/runs/clips}
+      - EVENTS_DIR=${EVENTS_DIR:-/app/runs/events}
+      - SAVE_EVENT_SIDECAR=${SAVE_EVENT_SIDECAR:-1}
       - CLIP_FPS=${CLIP_FPS:-24}
       - CLIP_RESIZE_WIDTH=${CLIP_RESIZE_WIDTH:-640}
       - CLIP_RESIZE_HEIGHT=${CLIP_RESIZE_HEIGHT:-480}

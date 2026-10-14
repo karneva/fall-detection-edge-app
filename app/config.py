@@ -79,6 +79,9 @@ ENABLE_DEVICE_PAIRING = _env_flag(
 # ---------------------------------------------------------
 RUNS_DIR = os.getenv("RUNS_DIR", "runs")
 CLIP_DIR = os.getenv("CLIP_DIR", f"{RUNS_DIR}/clips")
+# 낙상/억제 이벤트의 분석용 sidecar JSON 저장 위치 및 활성화 여부
+EVENTS_DIR = os.getenv("EVENTS_DIR", f"{RUNS_DIR}/events")
+SAVE_EVENT_SIDECAR = _env_flag("SAVE_EVENT_SIDECAR", True)
 
 # ---------------------------------------------------------
 # 실시간 사고 영상(Clip) 녹화 파라미터
