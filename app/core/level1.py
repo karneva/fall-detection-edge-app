@@ -1,9 +1,16 @@
 import logging
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, List, Tuple
+import time
+from typing import Optional, Dict, Any, List, Tuple, Callable
 
 logger = logging.getLogger(__name__)
-from ..config import DEVICE_ID, LOCATION_ID, ABNORMAL_TIMEOUT_S
+from ..config import (
+    DEVICE_ID, LOCATION_ID, ABNORMAL_TIMEOUT_S,
+    AI_MODE, AI_SUPPRESS_PFALL_TH, AI_ESCALATE_S, AI_ESCALATE_REQUIRES_DROP,
+)
+
+# AI 검증기: 키포인트 시퀀스(30 x 34)를 받아 p_fall(0~1)을 반환, 판단 불가 시 None
+Verifier = Callable[[List[List[float]]], Optional[float]]
 
 def bbox_aspect(bbox: Optional[List[float]]) -> Optional[float]:
     """바운딩 박스의 가로세로비(Height/Width)를 계산합니다."""
@@ -111,6 +118,28 @@ class Level1Params:
     height_ratio_th: float = 0.65
     height_persist_s: float = 0.20
 
+    # AI 2차 검증
+    ai_mode: str = AI_MODE                          # veto | shadow | off
+    ai_suppress_pfall_th: float = AI_SUPPRESS_PFALL_TH
+    ai_escalate_s: float = AI_ESCALATE_S
+    ai_escalate_requires_drop: bool = AI_ESCALATE_REQUIRES_DROP
+
+
+class _ClassifierVerifier:
+    """기본 검증기: 1D CNN 분류기(싱글턴)를 지연 로드해서 사용합니다."""
+
+    def __call__(self, seq: List[List[float]]) -> Optional[float]:
+        from ..ai_classifier.inference import get_classifier
+        return get_classifier().predict_proba(seq)
+
+    @property
+    def model_id(self) -> Optional[str]:
+        try:
+            from ..ai_classifier.inference import get_classifier
+            return get_classifier().weights_hash
+        except Exception:
+            return None
+
 
 class Level1Engine:
     """
@@ -122,9 +151,10 @@ class Level1Engine:
                 v
               NORMAL (회복 시)
     """
-    def __init__(self, p: Level1Params):
+    def __init__(self, p: Level1Params, verifier: Optional[Verifier] = None):
         from collections import deque
         self.p = p
+        self._verifier = verifier if verifier is not None else _ClassifierVerifier()
 
         self.state = "NORMAL"
         self.abnormal_start_ts: Optional[float] = None
@@ -179,6 +209,7 @@ class Level1Engine:
 
         # AI 검증용 키포인트 시퀀스 버퍼 (최근 30프레임)
         self.kp_seq = deque(maxlen=30)
+        self.kp_ts = deque(maxlen=30)
 
         # 타겟 스위칭 보호용 유예 설정
         self.switch_grace_until_ts: float = 0.0
@@ -234,6 +265,7 @@ class Level1Engine:
         self.height_acc_s = 0.0
         self.baseline_h_at_enter = None
         self.kp_seq.clear()
+        self.kp_ts.clear()
         self.switch_grace_until_ts = 0.0
 
     def _compute_baseline_h(self, ts: float) -> Optional[float]:
@@ -458,6 +490,7 @@ class Level1Engine:
                     curr_kp_flat[kid*2] = float(k.get("x", 0.0))
                     curr_kp_flat[kid*2+1] = float(k.get("y", 0.0))
         self.kp_seq.append(curr_kp_flat)
+        self.kp_ts.append(ts)
 
         shoulder_vy, shoulder_drop = self._compute_shoulder_drop(ts, kps_list)
 
@@ -627,17 +660,18 @@ class Level1Engine:
                 self.cooldown_until_ts = ts + self.p.level1_cooldown_s
 
                 # AI 2차 검증 수행
-                ai_label, ai_conf = self._verify_with_ai()
-                if ai_label == 0: # ADL (정상)으로 판정된 경우
-                    logger.info(f"[AI SUPPRESSED] Rule-based detected fall, but AI says ADL (conf={ai_conf:.2f})")
+                ai = self._verify_with_ai(ts)
+                if ai["suppress"]: # ADL (정상)으로 판정된 경우
+                    logger.info(f"[AI SUPPRESSED] Rule-based detected fall, but AI says ADL (p_fall={ai['p_fall']:.2f})")
                     event = {
                         "type": "ai_suppressed",
                         "ts": ts,
                         "frame_index": frame_index,
                         "reason": "still_for_sustain_s",
                         "values": {
-                            "ai_conf": ai_conf,
-                            "logic": "still_for_sustain_s"
+                            "ai_conf": ai["conf"],
+                            "logic": "still_for_sustain_s",
+                            "ai": ai,
                         }
                     }
                     self.reset_all()
@@ -660,6 +694,7 @@ class Level1Engine:
                         "confirmed": self.abnormal_confirmed,
                         "confidence_score": conf_score,
                         "confidence_detail": conf_detail,
+                        "ai": ai,
                     },
                 }
 
@@ -672,17 +707,18 @@ class Level1Engine:
                     self.cooldown_until_ts = ts + self.p.level1_cooldown_s
 
                     # AI 2차 검증 수행 (타임아웃 시에도 적용)
-                    ai_label, ai_conf = self._verify_with_ai()
-                    if ai_label == 0:
-                        logger.info(f"[AI SUPPRESSED] Timeout fall, but AI says ADL (conf={ai_conf:.2f})")
+                    ai = self._verify_with_ai(ts)
+                    if ai["suppress"]:
+                        logger.info(f"[AI SUPPRESSED] Timeout fall, but AI says ADL (p_fall={ai['p_fall']:.2f})")
                         event = {
                             "type": "ai_suppressed",
                             "ts": ts,
                             "frame_index": frame_index,
                             "reason": "abnormal_timeout",
                             "values": {
-                                "ai_conf": ai_conf,
-                                "logic": "abnormal_timeout"
+                                "ai_conf": ai["conf"],
+                                "logic": "abnormal_timeout",
+                                "ai": ai,
                             }
                         }
                         self.reset_all()
@@ -706,6 +742,7 @@ class Level1Engine:
                             "kp_move": kp_move,
                             "confidence_score": conf_score,
                             "confidence_detail": conf_detail,
+                            "ai": ai,
                         },
                     }
                 else:
@@ -807,23 +844,83 @@ class Level1Engine:
         
         return round(total_score, 1), detail
 
-    def _verify_with_ai(self) -> Tuple[int, float]:
-        """AI 분류기를 사용하여 낙상 여부를 최종 검증합니다."""
-        if len(self.kp_seq) < 30:
-            return 1, 1.0 # 데이터 부족 시 일단 규칙 기반 결과 유지
-            
-        from ..ai_classifier.inference import get_classifier
+    def _verify_with_ai(self, ts: float) -> Dict[str, Any]:
+        """
+        AI 분류기로 낙상 여부를 검증합니다. 절대 예외를 던지지 않습니다.
 
-        classifier = get_classifier()
-        label, conf = classifier.predict(list(self.kp_seq))
-        
-        if label is None:
-            # AI가 확신하지 못함 -> 안전을 위해 룰베이스 결과인 '낙상(1)'을 그대로 인정
-            logger.info(f"[AI UNCERTAIN] Conf: {conf:.2f}. Defaulting to rule-base.")
-            return 1, conf
-            
-        logger.info(f"[AI VERIFY] Result: {'FALL' if label==1 else 'ADL'}, Conf: {conf:.2f}")
-        return label, conf
+        판단이 불가능한 경우(검증기 비활성, 프레임 부족, 오류)에는
+        안전을 위해 suppress=False로 룰 기반 결과를 그대로 인정합니다(fail-open).
+        """
+        mode = self.p.ai_mode
+        th = self.p.ai_suppress_pfall_th
+        window_start = self.kp_ts[0] if self.kp_ts else None
+        window_end = self.kp_ts[-1] if self.kp_ts else None
+        ai: Dict[str, Any] = {
+            "mode": mode,
+            "decision": "unavailable",
+            "p_fall": None,
+            "conf": None,
+            "suppress": False,
+            "threshold": th,
+            "ts": ts,
+            "n_frames": len(self.kp_seq),
+            "window_start_ts": window_start,
+            "window_end_ts": window_end,
+            "window_offset_from_abnormal_s": (
+                window_start - self.abnormal_start_ts
+                if window_start is not None and self.abnormal_start_ts is not None else None
+            ),
+            "latency_ms": None,
+            "model_id": None,
+        }
+
+        if mode == "off":
+            ai["decision"] = "off"
+            return ai
+        if len(self.kp_seq) < 30:
+            # 데이터 부족 시 일단 규칙 기반 결과 유지
+            logger.info("[AI UNAVAILABLE] not enough frames. Defaulting to rule-base.")
+            return ai
+
+        t0 = time.perf_counter()
+        try:
+            p_fall = self._verifier(list(self.kp_seq))
+        except Exception:
+            logger.exception("[AI ERROR] verifier raised. Defaulting to rule-base.")
+            ai["decision"] = "error"
+            return ai
+        finally:
+            ai["latency_ms"] = round((time.perf_counter() - t0) * 1000.0, 2)
+            try:
+                ai["model_id"] = getattr(self._verifier, "model_id", None)
+            except Exception:
+                ai["model_id"] = None
+
+        if p_fall is None:
+            # AI가 판단 불가 -> 안전을 위해 룰베이스 결과인 '낙상'을 그대로 인정
+            logger.info("[AI UNAVAILABLE] verifier returned None. Defaulting to rule-base.")
+            return ai
+
+        try:
+            p_fall = float(p_fall)
+        except (TypeError, ValueError):
+            logger.error(f"[AI ERROR] verifier returned non-numeric {p_fall!r}. Defaulting to rule-base.")
+            ai["decision"] = "error"
+            return ai
+        if not (0.0 <= p_fall <= 1.0):
+            # NaN 포함 범위 밖 값은 신뢰하지 않음
+            logger.error(f"[AI ERROR] verifier returned out-of-range p_fall={p_fall}. Defaulting to rule-base.")
+            ai["decision"] = "error"
+            return ai
+
+        ai["p_fall"] = p_fall
+        ai["conf"] = max(p_fall, 1.0 - p_fall)
+        # p_fall <= 0.4 는 기존 'ADL 판정 & conf >= 0.6' 조건과 동치
+        ai["decision"] = "adl" if p_fall <= th else "fall"
+        ai["suppress"] = (ai["decision"] == "adl" and mode == "veto")
+
+        logger.info(f"[AI VERIFY] mode={mode} decision={ai['decision']} p_fall={p_fall:.2f}")
+        return ai
 
 
 @dataclass
