@@ -186,9 +186,9 @@ AI가 억제한 사건(`not_fall` 클립)도 검수 전에는 ADL로 단정하�
 이 저장소에는 예시 파일과 검증 스크립트를 함께 제공합니다.
 
 - 예시 manifest:
-  `app/ai_classifier/eval_manifest.example.jsonl`
+  `eval/eval_manifest.example.jsonl`
 - 검증/요약 스크립트:
-  `app/ai_classifier/evalset_tools.py`
+  `app/eval/evalset_tools.py`
 
 검증 규칙:
 
@@ -198,8 +198,8 @@ AI가 억제한 사건(`not_fall` 클립)도 검수 전에는 ADL로 단정하�
 - `--check-files`로 `file_path` 존재 여부까지 확인 (상대경로는 `--root` 기준, 기본값은 현재 디렉터리이므로 저장소 루트에서 실행)
 
 ```bash
-python -m app.ai_classifier.evalset_tools validate --manifest app/ai_classifier/eval_manifest.example.jsonl --check-files --root .
-python -m app.ai_classifier.evalset_tools summary --manifest app/ai_classifier/eval_manifest.example.jsonl
+python -m app.eval.evalset_tools validate --manifest eval/eval_manifest.example.jsonl --check-files --root .
+python -m app.eval.evalset_tools summary --manifest eval/eval_manifest.example.jsonl
 ```
 
 ## Manifest 필드 규격

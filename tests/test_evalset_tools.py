@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.ai_classifier.evalset_tools import load_manifest, summarize_rows, validate_rows
+from app.eval.evalset_tools import load_manifest, summarize_rows, validate_rows
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,7 +17,7 @@ def row(i, split, session, subject, label="fall", file_path=None):
 
 class EvalsetToolsTest(unittest.TestCase):
     def test_example_manifest_is_valid(self):
-        rows = load_manifest(str(REPO_ROOT / "app" / "ai_classifier" / "eval_manifest.example.jsonl"))
+        rows = load_manifest(str(REPO_ROOT / "eval" / "eval_manifest.example.jsonl"))
         errors, _ = validate_rows(rows)
         self.assertEqual(errors, [])
 

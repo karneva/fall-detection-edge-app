@@ -68,4 +68,3 @@ app/ai_classifier/weights/
 
 # Versioned evaluation inputs/baselines (exceptions to the rules above)
 !eval/**/*.jsonl
-!app/ai_classifier/eval_manifest.example.jsonl
