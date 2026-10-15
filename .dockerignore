@@ -1,0 +1,20 @@
+# Jetson 이미지 빌드 컨텍스트에서 제외 (런타임에 필요 없는 것)
+# 주의: 가중치(app/ai_classifier/weights, *.pt, *.engine)는 제외하지 않음
+.git
+.gitattributes
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.venv
+venv
+
+# 실행 산출물, 원본/학습 데이터
+runs/
+dataset/
+/data/
+app/ai_classifier/data/
+
+# 로컬 비밀값 (.env.example은 포함)
+.env
+.env.*
+!.env.example
