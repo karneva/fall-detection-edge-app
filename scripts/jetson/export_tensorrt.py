@@ -4,7 +4,6 @@ PyTorch 모델(.pt)을 Jetson 하드웨어 가속에 최적화된 TensorRT 엔�
 이 과정은 Jetson 내부 또는 동일한 아키텍처의 GPU PC에서 실행해야 최적의 성능을 낼 수 있습니다.
 """
 
-import os
 import sys
 import argparse
 import logging
@@ -112,8 +111,8 @@ def export_to_tensorrt(
         
         print("\n배포 가이드:")
         print(f"  1. 생성된 '{engine_path.name}' 파일을 Jetson 장비의 루트 디렉토리로 이동시키세요.")
-        print(f"  2. 'app/config.py' 파일에서 MODEL_PATH 변수를 위 파일 이름으로 변경하세요.")
-        print(f"  3. 'python -m app.main' 명령어로 애플리케이션을 구동하세요.\n")
+        print("  2. .env의 MODEL_PATH 환경변수를 위 파일 이름으로 지정하세요.")
+        print("  3. 'docker compose up' 또는 'uvicorn app.main:app'으로 애플리케이션을 구동하세요.\n")
         
         return engine_path
 
@@ -125,7 +124,7 @@ def export_to_tensorrt(
 def verify_engine(engine_path: Union[str, Path], test_image: Optional[str] = None):
     """생성된 TensorRT 엔진이 정상적으로 작동하는지 자가 진단합니다."""
     engine_path = Path(engine_path)
-    logger.info(f"🔍 생성된 엔진 검증 중...")
+    logger.info("🔍 생성된 엔진 검증 중...")
     
     try:
         # 엔진 로드 테스트

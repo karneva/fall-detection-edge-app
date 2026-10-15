@@ -8,7 +8,6 @@ import os
 import time
 import torch
 import numpy as np
-import cv2
 from ultralytics import YOLO
 
 def benchmark_model(model_path, num_frames=100, warm_up=10):
@@ -70,7 +69,7 @@ def main():
         results["TensorRT (.engine)"] = benchmark_model(engine_path)
     else:
         print(f"주의: 최적화 엔진(.engine)을 찾을 수 없습니다: {engine_path}")
-        print("참고: 먼저 'python export_tensorrt.py'를 실행하여 모델을 변환하세요.")
+        print("참고: 먼저 'python scripts/jetson/export_tensorrt.py'를 실행하여 모델을 변환하세요.")
 
     # 3. 종합 성능 비교표 출력
     if len(results) >= 2:
