@@ -36,6 +36,9 @@ RUNTIME_MODULES = (
     "app.modes.qr_mode",
     "app.state.device_state",
     "app.ai_classifier.weights_resolver",
+    # 함수 안에서 지연 import되는 분류기 모듈도 확인 (numpy가 없으면 스텁)
+    "app.ai_classifier.features",
+    "app.ai_classifier.inference",
 )
 
 SCRIPT = textwrap.dedent(

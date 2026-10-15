@@ -11,6 +11,13 @@ import numpy as np
 from tqdm import tqdm
 from ultralytics import YOLO
 
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+    # python training/<script>.py 로 직접 실행한 경우에도 저장소 루트의 app/, training/을 찾도록
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from app.ai_classifier.features import normalize_frame_v1 as normalize_keypoints
 from training.paths import DATA_DIR, URFD_ROOT, YOLO_POSE_MODEL
 

@@ -8,6 +8,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+if __package__ in (None, ""):
+    # python training/<script>.py 로 직접 실행한 경우에도 저장소 루트의 app/, training/을 찾도록
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from training.paths import ACTIVE_DATA_DIR, RUNS_NOT_FALL_CLIPS, YOLO_POSE_MODEL
 
 

@@ -39,6 +39,16 @@ class TrainingPathsTest(unittest.TestCase):
         importlib.reload(paths)
 
 
+class TrainingCliTest(unittest.TestCase):
+    def test_runs_by_module_and_by_file_path(self):
+        # retrain_from_runs는 표준 라이브러리만 import하므로 어디서나 --help 실행 가능해야 함
+        for cmd in (["-m", "training.retrain_from_runs", "--help"], ["training/retrain_from_runs.py", "--help"]):
+            proc = subprocess.run([sys.executable, *cmd], cwd=str(REPO_ROOT),
+                                  capture_output=True, text=True, timeout=60)
+            self.assertEqual(proc.returncode, 0, (cmd, proc.stderr[-1000:]))
+            self.assertIn("--input-dir", proc.stdout)
+
+
 @unittest.skipUnless(HAS_TORCH, "torch/numpy not installed")
 class TrainingImportTest(unittest.TestCase):
     def test_modules_import_without_side_effects(self):

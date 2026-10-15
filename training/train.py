@@ -4,6 +4,13 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import os
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+    # python training/<script>.py 로 직접 실행한 경우에도 저장소 루트의 app/, training/을 찾도록
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from app.ai_classifier.model import Fall1DCNN
 from training.paths import DATA_DIR, WEIGHTS_DIR
 
