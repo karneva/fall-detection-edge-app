@@ -10,7 +10,8 @@ from typing import Optional, Tuple, Dict, Any
 
 from .base_mode import BaseMode
 from ..engine import LivePipeline
-from ..core import Level1Params, Level1Engine, PresenceParams, PresenceEngine, ClipRecorder
+from ..core import Level1Params, Level1Engine, PresenceParams, PresenceEngine
+from ..media.clip_recorder import ClipRecorder
 from ..api.server_client import ServerClient
 from ..state.device_state import get_device_state
 from ..config import DEVICE_ID, LOCATION_ID, EVENTS_DIR, SAVE_EVENT_SIDECAR

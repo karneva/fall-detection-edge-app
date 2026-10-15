@@ -33,6 +33,7 @@ from .base_mode import BaseMode
 from ..state.device_state import get_device_state
 from ..api.server_client import ServerClient
 from ..config import DEVICE_ID
+from ..media.jpeg import encode_jpeg
 
 logger = logging.getLogger(__name__)
 
@@ -90,18 +91,13 @@ class QRMode(BaseMode):
         qr_data = self._detect_qr(frame)
         
         # 전처리 결과(박스 등)가 반영된 이미지를 스트리밍용 JPEG로 인코딩
-        jpg = self._encode_jpeg(frame)
+        jpg = encode_jpeg(frame, self.jpeg_quality)
         
         if qr_data:
             self._handle_qr(qr_data)
         
         self.frame_index += 1
         return None, jpg, frame, None
-    
-    def _encode_jpeg(self, frame) -> Optional[bytes]:
-        """프레임을 시각화용 JPEG 포맷으로 인코딩합니다."""
-        ok, jpg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality])
-        return jpg.tobytes() if ok else None
     
     def _detect_qr(self, frame) -> Optional[str]:
         """

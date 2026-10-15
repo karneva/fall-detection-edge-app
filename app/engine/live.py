@@ -7,6 +7,7 @@ from ultralytics import YOLO
 
 from ..config import FRAME_W, FRAME_H, DEFAULT_CONF, USE_HALF
 from ..core import build_observation
+from ..media.jpeg import encode_jpeg
 from .smoothing import ema_smooth_keypoints_inplace
 
 # COCO 17개 키포인트 연결(엣지) 정의
@@ -109,13 +110,6 @@ def select_best_person(results, last_bbox=None, iou_thresh=0.3):
         results.keypoints = results.keypoints[best_idx:best_idx + 1]
         
     return results, is_switched
-
-def encode_jpeg(img, jpeg_quality: int) -> Optional[bytes]:
-    """이미지 배열을 JPEG 데이터로 인코딩합니다."""
-    ok, jpg = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), int(jpeg_quality)])
-    if not ok:
-        return None
-    return jpg.tobytes()
 
 class LivePipeline:
     """

@@ -1,17 +1,11 @@
 import json
 import time
 import threading
-from typing import Optional, Dict, Any, Callable
+from typing import Dict, Any, Callable
 
 import cv2
 from ..config import FRAME_W, FRAME_H
-
-def encode_jpeg(img, jpeg_quality: int) -> Optional[bytes]:
-    """OpenCV 이미지 배열을 JPEG 데이터로 인코딩합니다."""
-    ok, jpg = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), int(jpeg_quality)])
-    if not ok:
-        return None
-    return jpg.tobytes()
+from .jpeg import encode_jpeg
 
 def render_replay_frame(obs: Dict[str, Any], w: int = FRAME_W, h: int = FRAME_H):
     """

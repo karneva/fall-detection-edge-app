@@ -1,10 +1,10 @@
 import threading
 import time
 import logging
-import cv2
 from typing import Optional, Dict, Any, Tuple
 
-from ..utils.camera import CameraManager
+from ..media.camera import CameraManager
+from ..media.jpeg import encode_jpeg
 from ..state.device_state import get_device_state
 from ..config import DEVICE_ID, LOCATION_ID, RUNS_DIR, JPEG_QUALITY
 from ..modes.base_mode import BaseMode
@@ -147,15 +147,7 @@ class AppController:
                     obs, overlay_jpg, raw_frame, _ = self.current_mode.step()
 
                     # 원본 프레임을 JPEG로 인코딩 (스트리밍용)
-                    raw_jpg = None
-                    if raw_frame is not None:
-                        ok, enc = cv2.imencode(
-                            ".jpg",
-                            raw_frame,
-                            [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
-                        )
-                        if ok:
-                            raw_jpg = enc.tobytes()
+                    raw_jpg = encode_jpeg(raw_frame, JPEG_QUALITY) if raw_frame is not None else None
 
                     with self.state_lock:
                         if obs is not None:
@@ -271,7 +263,7 @@ class AppController:
                 self.frame_count_overlay += 1
                 self.cond_overlay.notify_all()
 
-        from ..utils.replay import start_replay_thread
+        from ..media.replay import start_replay_thread
         self.replay_thread = start_replay_thread(
             path=path,
             fps=fps,

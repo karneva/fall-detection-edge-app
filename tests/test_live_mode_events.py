@@ -34,7 +34,7 @@ def _load_live_mode(clip_dir: str):
     patcher = mock.patch.dict(sys.modules, stubs)
     patcher.start()
     try:
-        # ClipRecorder 모듈이 import 시점에 만드는 폴더를 임시 경로로
+        # ClipRecorder 모듈(app/media/clip_recorder.py)이 import 시점에 만드는 폴더를 임시 경로로
         with mock.patch.object(app.config, "CLIP_DIR", clip_dir):
             mod = importlib.import_module("app.modes.live_mode")
     except Exception:

@@ -7,7 +7,6 @@ PEP 562 지연 export를 사용합니다. `from app.core import Level1Engine`처
 import importlib
 
 _LAZY = {
-    "ClipRecorder": ".clip_recorder",
     "Level1Engine": ".level1",
     "Level1Params": ".level1",
     "PresenceEngine": ".level1",
