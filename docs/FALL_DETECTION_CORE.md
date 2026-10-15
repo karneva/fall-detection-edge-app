@@ -221,12 +221,12 @@ AI는 룰 기반 낙상 알람을 "조용히" 지울 수 없어야 합니다. �
 ### 알려진 한계
 
 - CNN이 보는 창은 LEVEL1 시점의 최근 30프레임이라, 넘어지는 동작이 아니라 "누워서 정지" 구간입니다.
-  (`window_offset_from_abnormal_s`가 보통 `sustain_s - 2`초 이상) 로드맵 Day 5에서 해결합니다.
+  (`window_offset_from_abnormal_s`가 보통 `sustain_s - 2`초 이상) 로드맵 Day 7(런타임 정렬)에서 해결합니다.
 - LEVEL1 이후 리셋되면 누운 자세가 새 baseline이 되어 `abnormal_enter`/`abnormal_exit`가 몇 초 주기로 반복됩니다.
 - 사람이 계속 미검출(lost)이거나 품질이 낮으면 승격 조건이 평가되지 않습니다.
-- 억제 후 감시 중에 대상 스위칭(`target_switched`) 등으로 `reset_all`이 일어나면 승격 대기도 사라집니다. (Day 5)
+- 억제 후 감시 중에 대상 스위칭(`target_switched`) 등으로 `reset_all`이 일어나면 승격 대기도 사라집니다. (Day 7)
 - 급하강 없이 천천히 무너진 낙상을 AI가 억제하면 기본 설정에서는 승격되지 않습니다.
-  침대에 눕기 같은 ADL과 구분할 수 없기 때문이며, 낙상 동작을 보는 Day 5의 창 정렬로 해결합니다.
+  침대에 눕기 같은 ADL과 구분할 수 없기 때문이며, 낙상 동작을 보는 Day 7의 창 정렬로 해결합니다.
 - 승격된 알람의 클립은 ABNORMAL 진입 시점 기준으로 자릅니다. 클립 링버퍼(24fps 기준 약 80초)보다
   `ABNORMAL_TIMEOUT_S + AI_ESCALATE_S`가 길면 앞부분이 잘릴 수 있습니다.
 

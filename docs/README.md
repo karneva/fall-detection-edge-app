@@ -15,9 +15,7 @@
 - `EVALUATION_PROTOCOL.md`
   모델 비교를 위한 고정 평가셋 규격과 운영 원칙
 - `ROADMAP.md`
-  1D CNN 2차 검증 고도화 7일 계획과 진행 상황
-- `RELEASE_CHECKLIST.md`
-  GitHub 공개 전 최종 점검 항목
+  1D CNN 2차 검증 고도화 계획과 진행 상황
 
 ## 권장 읽기 순서
 
@@ -27,7 +25,6 @@
 4. `TUNING_GUIDE.md`
 5. `EVALUATION_PROTOCOL.md`
 6. `ROADMAP.md`
-7. `RELEASE_CHECKLIST.md`
 
 ## 문서 원칙
 

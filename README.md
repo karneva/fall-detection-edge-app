@@ -143,7 +143,7 @@ AI 분류기가 `ADL`로 판정하면 규칙 기반 탐지를 억제하고 `ai_s
 
 ### 실행 제어
 
-- `app/core/controller.py`
+- `app/controller.py`
   애플리케이션의 실제 메인 루프입니다.
   카메라 열기, 현재 모드 선택, 프레임 버퍼 갱신, 리플레이, JSONL 레코딩을 담당합니다.
 
@@ -166,21 +166,33 @@ AI 분류기가 `ADL`로 판정하면 규칙 기반 탐지를 억제하고 `ai_s
 ### 낙상 판단
 
 - `app/core/level1.py`
-  규칙 기반 낙상 판단 엔진
+  규칙 기반 낙상 판단 엔진과 AI 2차 검증 게이트 (표준 라이브러리만 사용)
+- `app/core/presence.py`
+  재실(입/퇴실) 감지
+- `app/core/kp_buffer.py`, `app/core/event_sidecar.py`
+  사건 구간 원시 키포인트 기록, 이벤트 sidecar 저장
 - `app/ai_classifier/model.py`
   1D CNN 모델 정의
 - `app/ai_classifier/inference.py`
-  2차 분류기 로딩 및 추론
+  2차 분류기 로딩(fail-open) 및 추론
+- `app/ai_classifier/features.py`
+  학습과 운영이 공유하는 입력 특징(정규화) 구현
 
 ### 데이터 구조
 
 - `app/core/obs_schema.py`
   YOLO 결과를 공통 Observation 구조로 변환
 
-### 클립 저장
+### 영상 입출력
 
-- `app/core/clip_recorder.py`
+- `app/media/clip_recorder.py`
   사고 전후 프레임 저장 및 MP4 생성
+- `app/media/camera.py`
+  OS별 카메라 열기, 해상도 설정, 오토포커스 제어
+- `app/media/replay.py`
+  저장된 Observation JSONL 기반 리플레이
+- `app/media/jpeg.py`
+  JPEG 인코딩
 
 ### 장치 상태 / 외부 통신
 
@@ -188,38 +200,44 @@ AI 분류기가 `ADL`로 판정하면 규칙 기반 탐지를 억제하고 `ai_s
   등록 상태, 토큰, 갱신 정보 저장
 - `app/api/server_client.py`
   페어링, 이벤트 보고, 토큰 갱신, 업로드 API 호출
-- `app/core/streamer.py`
+- `app/api/streamer.py`
   원본 프레임을 WebSocket으로 백엔드에 릴레이
 
-### 유틸리티
+### 오프라인 도구 (장치 런타임과 분리)
 
-- `app/utils/camera.py`
-  OS별 카메라 열기, 해상도 설정, 오토포커스 제어
-- `app/utils/replay.py`
-  저장된 Observation JSONL 기반 리플레이
+- `app/eval/`
+  이벤트 단위 replay 평가, 결과 비교(채택 규칙), 평가셋 manifest 검증, 합성 시나리오
+- `training/`
+  URFD/클립 키포인트 추출, 1D CNN 학습, 액티브 러닝 재학습
+- `scripts/jetson/`
+  TensorRT 변환, 모델 벤치마크, IP 보고 데몬
 
 ## 저장소 구조
 
 ```text
 .
-├── app/
-│   ├── ai_classifier/      # 2차 검증 모델, 학습/추론 코드
-│   ├── api/                # 서버/RPI 통신 클라이언트
-│   ├── core/               # 컨트롤러, 낙상 엔진, 클립 저장
-│   ├── engine/             # YOLO 추론 파이프라인, 스무딩
-│   ├── modes/              # QR 모드, Live 모드
-│   ├── state/              # 장치 등록 상태 저장
-│   ├── utils/              # 카메라, 리플레이 유틸
-│   ├── config.py           # 환경 변수 기반 설정
-│   └── main.py             # FastAPI 엔트리포인트
-├── docs/                   # 상세 기술 문서
-├── tests/                  # 합성 시나리오 기반 회귀 테스트 (unittest)
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-├── requirements-dev.txt    # 테스트용 의존성
-├── benchmark_models.py     # 모델 벤치마크 도구
-└── export_tensorrt.py      # TensorRT 변환 스크립트
+├── app/                        # Jetson 런타임 (uvicorn app.main:app)
+│   ├── main.py                 # FastAPI 엔트리포인트, API 라우트
+│   ├── controller.py           # 메인 처리 루프, 모드 전환, 레코딩/리플레이
+│   ├── config.py               # 환경변수 기반 설정 (환경변수는 여기서만 읽음)
+│   ├── core/                   # 판단 로직 (표준 라이브러리만): 낙상 엔진, 재실, 사건 버퍼, sidecar
+│   ├── ai_classifier/          # 2차 검증 1D CNN: 모델, 추론(fail-open), 특징, 가중치 경로
+│   │   └── weights/            # (git 제외) 학습된 가중치
+│   ├── engine/                 # YOLO Pose 추론 파이프라인, 키포인트 스무딩
+│   ├── media/                  # 카메라, 클립 녹화, 리플레이, JPEG (cv2/ffmpeg)
+│   ├── modes/                  # QR 페어링 모드, Live 감시 모드
+│   ├── api/                    # 백엔드/RPI REST 클라이언트, WebSocket 스트리머
+│   ├── state/                  # 장치 등록/토큰 상태
+│   └── eval/                   # 오프라인 평가 도구 (replay 평가, 비교, manifest 검증, 합성 시나리오)
+├── training/                   # 오프라인 학습/데이터 준비 (GPU 학습 머신)
+├── scripts/jetson/             # 장치용 수동 도구 (TensorRT 변환, 벤치마크, IP 보고)
+├── eval/                       # 버전 관리되는 평가 입력 (합성 baseline, 라벨/manifest 예시)
+├── tests/                      # 회귀 테스트 (unittest, golden trace 포함)
+├── docs/                       # 상세 기술 문서
+├── Dockerfile, docker-compose.yml, .env.example
+├── requirements.txt            # 런타임 의존성
+├── requirements-dev.txt        # 테스트용
+└── requirements-train.txt      # 학습용
 ```
 
 ### 테스트 실행
@@ -495,13 +513,14 @@ LiveMode
 흐름:
 
 1. `runs/clips/not_fall/*.mp4`에서 키포인트 시퀀스 추출
-2. `app/ai_classifier/data/active_learning/X_*.npy`, `y_*.npy` 생성
+2. `app/ai_classifier/data/active_learning/X_*.npy`, `y_*.npy` 생성 (`TRAIN_DATA_DIR`로 위치 변경 가능)
 3. 기존 train/val 데이터와 병합하여 active-learning 재학습
 
 실행 예시:
 
 ```bash
-python3 -m app.ai_classifier.retrain_from_runs
+pip install -r requirements-train.txt   # + CUDA에 맞는 torch
+python -m training.retrain_from_runs
 ```
 
 직접 촬영 데이터는 `dataset/custom/` 아래의 `train/`, `val/`, `eval_fixed/` 구조에 나눠 관리하는 것을 권장합니다.

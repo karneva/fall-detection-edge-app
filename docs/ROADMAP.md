@@ -1,4 +1,4 @@
-# Roadmap: 1D CNN 2차 검증 고도화 (7일)
+# Roadmap: 1D CNN 2차 검증 고도화
 
 ## 목표
 
@@ -19,7 +19,7 @@
    - 운영 입력은 EMA 스무딩된 키포인트, 학습 입력은 원본입니다.
    - 미검출 관절 (0,0)이 골반 기준으로 바뀌면서 큰 이상치가 됩니다.
    - 스케일과 종횡비 정규화가 없습니다.
-   - 정규화 코드가 3곳에 복제되어 있습니다.
+   - 정규화 코드가 3곳에 복제되어 있습니다. (Day 3에서 features.py로 통합)
 4. AI가 실제 낙상 알람을 지울 수 있던 경로 (Day 1에서 해결)
    - 가중치 경로가 어긋나면 랜덤 모델로 판정했습니다.
    - 억제 후 쿨다운과 리셋 때문에 누운 사람이 다시 알람을 받지 못했습니다.
@@ -67,7 +67,7 @@ CNN이 실제 낙상 알람을 조용히 지우는 경로를 막았습니다. �
 
 계획했던 내용:
 
-- `tools/replay_eval.py`: 녹화된 `obs_*.jsonl`과 라벨을 받아 엔진을 오프라인으로 재생합니다.
+- `app/eval/replay_eval.py`: 녹화된 `obs_*.jsonl`과 라벨을 받아 엔진을 오프라인으로 재생합니다.
   rules-only와 rules+AI를 비교하고, 이벤트 recall, 시간당 오탐, 알람 지연, 억제된 실제 낙상 수를 냅니다.
 - 결과 비교 스크립트와 합성 baseline을 추가하고, eval manifest 예시를 버전 관리합니다.
 - `evalset_tools`: train과 eval 사이 subject/session 누수를 error로 처리합니다.
@@ -75,46 +75,70 @@ CNN이 실제 낙상 알람을 조용히 지우는 경로를 막았습니다. �
 - 이벤트 sidecar(CNN 입력 창, `p_fall`, 모델 해시)를 저장하고 처리 fps를 노출합니다.
 - [owner] 보유한 obs 로그에 라벨을 달고, 배포 카메라로 연출 낙상과 하드 ADL을 녹화합니다.
 
-### Day 3: 학습과 운영 입력 통일
+### Day 3: 리팩토링과 폴더 정리 ✅
 
-- `app/ai_classifier/features.py` (numpy만 사용)
-  - v1: 기존 정규화를 비트 단위로 그대로 재현
-  - v2: 타임스탬프 기준 15Hz 리샘플링, 등방 좌표, 몸통 길이 스케일, 전역 골반 궤적, 속도, conf 마스크
-- 정규화 3중 복제를 제거하고, 가중치 `meta.json`(feature_version, arch, hz)을 두어 로드 시 검증합니다.
-- 영상별 중간 포맷(npz) 추출 단계를 분리하고, URFD 프레임 라벨 파서를 추가합니다.
-- [owner] URFD 중간 포맷 추출 (YOLO만 사용, 학습 없음)
+판정 로직은 그대로 두고(golden trace로 이벤트 동일성 확인), 이후 모델 작업을 위한 구조를 만들었습니다.
 
-### Day 4: 라벨 정정과 모델 학습 레시피
+- [x] 안전망: Level1 이벤트 golden trace 테스트, 런타임 모듈 import 스모크 테스트
+- [x] 런타임/오프라인 분리: `app/`(Jetson), `training/`(학습), `app/eval/`(평가), `scripts/jetson/`(장치 도구), `eval/`(평가 입력)
+- [x] `app/core`는 판단 로직만: controller -> `app/`, streamer -> `app/api/`, clip_recorder/camera/replay -> `app/media/`, PresenceEngine 분리
+- [x] 중복 제거: 키포인트 정규화 3곳 -> `app/ai_classifier/features.py`(비트 단위 동일성 테스트), JPEG 인코딩 4곳 -> `app/media/jpeg.py`
+- [x] 죽은 코드 삭제(`app/auth`, `_qr_deblur_helper`, `MetricsCollector`, 미사용 메서드/상태/import), 환경변수 읽기를 `config.py`로 일원화
+- [x] 줄바꿈 LF 고정, `.dockerignore`, `requirements-train.txt`
 
-- 낙상 onset 기준으로 창을 잡아 라벨링하고, 하드 네거티브를 태깅합니다.
-- event-group k-fold 분할 (cam0/cam1은 같은 그룹)
-- `FallTCN` (dilated residual TCN, 약 40k 파라미터, 입력 길이 무관). 기존 `Fall1DCNN`은 유지합니다.
-- 증강: 좌우 flip, 스케일, 회전, jitter, 관절/프레임 dropout, time-warp
-- 시드 고정, class-weighted CE, AdamW + cosine, PR-AUC 기준 best 선택, 메트릭 JSON 저장
-- temperature scaling과 recall 제약 하의 억제 임계값 보정
-- [owner] v2 특징 + FallTCN 학습. v1 baseline과 비교해 라벨 효과와 모델 효과를 분리해서 기록합니다.
+## 다음 일정: 1D CNN 고도화 (데이터 -> 구조 -> 보정 순서, 효과를 단계별로 분리 측정)
 
-### Day 5: 런타임 정렬
+현재 `Fall1DCNN` 진단: 파라미터 204,290개 중 60%가 flatten 뒤 FC(122,944개)에 몰려 있고,
+수용영역은 10프레임(Jetson 기준 약 0.7초)이며 입력 길이가 30프레임으로 고정되어 있습니다.
+모델이 낙상 동작이 아닌 "누워서 정지" 구간을 보는 문제를 먼저 고쳐야 구조 개선이 의미를 가집니다.
 
-- v2 모델은 ABNORMAL 진입 시점 창(낙상 동작 포함)을 분류하게 합니다. v1 가중치는 기존 경로를 유지합니다.
-- 알려진 결함 두 가지를 수정합니다 (`tests/test_level1_safety.py`의 `KnownIssuesTest`).
-  - CNN 창이 낙상 onset을 포함하지 않는 문제
-  - LEVEL1 이후 누운 자세에서 abnormal_enter/exit가 반복되는 문제
-- 타깃 연속성 판정 개선: 후보가 1명이면 switch 판정 금지, ABNORMAL 중에는 스위치 리셋 금지
-- lost 상태에서도 승격 조건 평가, fps 독립 정지 판정 옵션
-- [owner] replay_eval로 rules-only, v1, v2를 비교하고, Jetson에서 shadow 모드로 운영합니다.
+### Day 4: 학습과 운영 입력 통일 (모델은 그대로)
 
-### Day 6: 현장 피드백 루프 정상화
+- `app/ai_classifier/features.py` v2: 타임스탬프 기준 15Hz 리샘플링, 0.2초 이하 공백만 보간하고 나머지는 마스크,
+  등방 픽셀 좌표와 몸통 길이 스케일 정규화, 전역 골반 궤적, 초당 속도, 몸통 각도, bbox 종횡비, conf 마스크
+- `training/datasets/extract_npz.py`: 영상별 중간 포맷(ts, kps 17x3, bbox, frame_wh, frame_label, 메타)
+- `training/datasets/urfd_labels.py`: URFD cam0 프레임 라벨(-1/0/1) 파서, cam0/cam1 같은 event_group
+- `kp_buffer`/sidecar에 frame_w/h 기록, 가중치 `meta.json` 검증(불일치 시 fail-open)
+- [owner, GPU] URFD YOLO 추출만 실행
 
-- 클립 검수 큐: `runs/clips/{fall,not_fall}`을 사람이 검수한 뒤에만 학습에 사용합니다.
-- `retrain_from_runs.py`의 무검수 자동 라벨(0) 제거
-  (승격된 실제 낙상 클립도 `not_fall`에 저장되므로 필수입니다)
-- 운영 도메인 홀드아웃을 val에 포함하고, recall이 떨어지지 않을 때만 모델을 승격하는 게이트를 둡니다.
-- [owner] 클립 검수, fine-tune, 승격 게이트 실행
+### Day 5: 라벨, 창, 분할과 데이터 분석 (CPU)
 
-### Day 7: 데이터 확장과 마무리
+- `training/windows.py`: 낙상 onset 기준 양성 창, ADL/onset 이전 음성 창, 룰 트리거 창 하드 네거티브 태깅
+- `training/splits.py`: StratifiedGroupKFold(5, event_group), fold 배정 저장과 누수 테스트
+- Data card / EDA: fps 분포, 관절 결측률, 낙상 vs 하드 ADL 하강 속도 분포
+- 고전 ML 비교군: 손으로 만든 시계열 특징 + LogReg/GBDT, 특징 중요도
 
-- Le2i, UP-Fall 어댑터 (라이선스 확인 후)
-- (선택, 플래그) `p_fall` 기반 소프트 융합: 확실한 낙상은 알람을 앞당기고, 애매하면 억제 대신 대기 연장
-- 분류기 ONNX export와 parity 테스트, classifier를 포함한 end-to-end 벤치마크
-- 최종 평가를 in-domain, cross-dataset, 현장 eval로 나눠 문서에 반영
+### Day 6: 모델 zoo와 학습 하네스
+
+- `app/ai_classifier/models/`: `Fall1DCNN`(v1 유지), `Fall1DCNN-GAP`(81k), `FallTCN-40`(43k, dilation 1/2/4/8,
+  수용영역 61스텝, attention pooling, 프레임 보조 head), `GRU-64`
+- `training/augment.py`: 속도/fps 교란, 앵커 jitter, 좌우 flip(관절 swap), 스케일/종횡비, 관절 dropout
+- `training/train_cv.py`: fold x seed, 이벤트 가중 CE, OOF 기반 선택, `runs/train/<id>/` 기록
+- [owner, GPU] ablation R0~R8 실행 (분할 수정 -> 라벨/창 -> 특징 -> 헤드 -> TCN -> 보조 head)
+
+### Day 7: 보정과 런타임 정렬
+
+- `training/calibrate.py`: temperature scaling, OOF recall 제약 억제 임계값, reliability diagram -> `meta.json`
+- v2 모델은 ABNORMAL 진입 사건 구간을 분류 (v1 경로와 공존, shadow로 먼저 운영)
+- `KnownIssuesTest` 2건 해소 (CNN 창이 낙상 onset 미포함, LEVEL1 이후 enter/exit 반복), `replay_eval`에 v2 모드 추가
+- 타깃 연속성: 후보가 1명이면 switch 판정 금지, ABNORMAL/억제 감시 중 스위치 리셋 금지, lost 중 승격 평가
+
+### Day 8: 강건성, 배포 증거, 피드백 루프
+
+- 강건성: fps 10/20Hz, 관절 dropout, EMA vs 원시 입력, 카메라 시점
+- `training/export_onnx.py`와 PyTorch-ORT parity 테스트, Jetson 지연(ORT CPU / TensorRT FP16)
+- 클립 검수 큐, `retrain_from_runs`의 무검수 라벨 0 제거 (승격된 실제 낙상도 `not_fall`에 저장되기 때문)
+- [owner, GPU/Jetson] 실험 실행과 지연 측정
+
+### Day 9: 일반화와 포트폴리오 정리
+
+- Le2i 어댑터와 cross-dataset 평가 (URFD+커스텀 학습 -> Le2i 테스트)
+- `docs/MODEL_STUDY.md`(진단, ablation 표, 신뢰구간, attention 그림), `DATA_CARD.md`, `RESEARCH_SKELETON_MODELS.md`
+  (TCN, InceptionTime, MiniRocket, ST-GCN, Transformer 비교와 채택 근거)
+- (선택) 사전학습 ST-GCN++ 전이 학습 기술 검증
+
+주의:
+
+- 라벨, 특징, 구조를 한 실험에서 동시에 바꾸지 않습니다.
+- 낙상 이벤트가 약 30개라 1개 차이가 recall 약 17%p입니다. 신뢰구간 안의 차이는 "구분 불가"로 씁니다.
+- 합성 시나리오 결과는 제어 흐름 회귀 테스트일 뿐, 정확도 지표로 쓰지 않습니다.

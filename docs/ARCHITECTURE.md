@@ -84,7 +84,7 @@ Camera frame
 - `AppController`, `WebSocketStreamer` 시작/종료
 - 상태 조회, 스트리밍, 레코딩, 리플레이 API 정의
 
-### `app/core/controller.py`
+### `app/controller.py`
 
 - 실제 메인 제어 루프
 - 현재 모드 선택
@@ -144,17 +144,20 @@ YOLO 결과를 아래 공통 구조로 정규화합니다.
 
 - 규칙 기반 낙상 판단 상태 머신
 - `NORMAL -> ABNORMAL -> LEVEL1`
-- 재실 감지 엔진 포함
 - 신뢰도 점수 계산
-- 2차 AI 검증 연결
+- 2차 AI 검증 게이트 (fail-open, veto/shadow/off, 억제 후 승격)
+- 재실 감지는 `app/core/presence.py`
+- `app/core/`는 표준 라이브러리만 사용 (테스트로 강제)
 
 ### `app/ai_classifier/*`
 
 - `model.py`: 1D CNN 구조
-- `inference.py`: 모델 로딩, 시퀀스 정규화, 추론
-- `train*.py`: 학습 파이프라인
+- `inference.py`: 모델 로딩(fail-open), 추론
+- `features.py`: 학습과 운영이 공유하는 입력 특징
+- `weights_resolver.py`: 가중치 경로 탐색 (`weights/`)
+- 학습 코드는 런타임과 분리된 `training/`에 있음
 
-### `app/core/clip_recorder.py`
+### `app/media/clip_recorder.py`
 
 - 최근 프레임을 JPEG 링버퍼로 유지
 - 낙상 발생 시 전후 구간 MP4 저장
@@ -215,5 +218,14 @@ YOLO 결과를 아래 공통 구조로 정규화합니다.
 - `runs/*.jsonl`
 - `runs/clips/fall/*.mp4`
 - `runs/clips/not_fall/*.mp4`
+- `runs/events/*.json` (이벤트 sidecar)
+- `runs/eval/*.json` (오프라인 평가 결과)
+
+## 코드 배치 원칙
+
+- `app/`: Jetson에서 실행되는 코드만 둡니다. `training/`, `scripts/`를 import하지 않습니다.
+- `app/core/`: 판단 로직. cv2/numpy/torch 없이 import되어 PC에서 바로 테스트할 수 있습니다.
+- `app/media/`, `app/engine/`: cv2/YOLO 같은 장치 의존 코드.
+- `app/eval/`, `training/`: 오프라인 도구. 평가 도구는 표준 라이브러리만 사용합니다.
 
 공개 저장소 기준으로는 이 디렉터리를 Git 추적 대상에서 제외하는 것이 맞습니다.

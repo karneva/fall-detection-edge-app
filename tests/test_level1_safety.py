@@ -262,7 +262,7 @@ class KnownIssuesTest(unittest.TestCase):
     @unittest.expectedFailure
     def test_ai_window_contains_fall_onset(self):
         # 현재 CNN은 LEVEL1 시점(진입 후 sustain_s 경과)의 최근 30프레임만 봄.
-        # 즉 넘어지는 동작이 아닌 '누워서 정지' 구간을 분류함. (로드맵 Day 5에서 해결)
+        # 즉 넘어지는 동작이 아닌 '누워서 정지' 구간을 분류함. (로드맵 Day 7에서 해결)
         obs, truth = make_scenario("fast_fall", lie_s=20.0)
         events = run_engine(obs, params(), CountingVerifier(0.9))
         ai = of_type(events, "level1")[0]["values"]["ai"]
@@ -271,7 +271,7 @@ class KnownIssuesTest(unittest.TestCase):
     @unittest.expectedFailure
     def test_no_enter_exit_flapping_after_level1(self):
         # LEVEL1 후 reset_all 하면 누운 자세가 새 baseline이 되어
-        # abnormal_enter -> abnormal_exit(recovered)가 몇 초 주기로 반복됨. (로드맵 Day 5에서 해결)
+        # abnormal_enter -> abnormal_exit(recovered)가 몇 초 주기로 반복됨. (로드맵 Day 7에서 해결)
         obs, _ = make_scenario("fast_fall", lie_s=60.0)
         events = run_engine(obs, params(), CountingVerifier(0.9))
         self.assertEqual(of_type(events, "abnormal_exit"), [])
