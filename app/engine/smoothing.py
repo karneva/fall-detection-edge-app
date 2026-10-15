@@ -6,7 +6,6 @@ logger = logging.getLogger(__name__)
 
 from ..config import (
     KP_EMA_ENABLE,          # EMA 스무딩 전체 활성화 여부
-    KP_EMA_ALPHA,           # 기본 EMA 알파값 (폴백용)
     KP_MIN_CONF_FOR_SMOOTH, # 이 임계치보다 낮은 신뢰도는 업데이트 건너뜀 (홀드)
     KP_ALPHA_BY_ID,         # 관절별(Id) 특화 알파 테이블
     KP_ALPHA_DEFAULT,       # 기본 알파
@@ -76,10 +75,7 @@ def _alpha_for(kid: int, conf: float) -> float:
     낮은 신뢰도일수록 이전 값을 더 많이 신뢰하도록 가중치를 조정합니다.
     """
     base = float(
-        KP_ALPHA_BY_ID.get(
-          kid,
-          KP_ALPHA_DEFAULT if KP_ALPHA_DEFAULT is not None else KP_EMA_ALPHA
-        )
+        KP_ALPHA_BY_ID.get(kid, KP_ALPHA_DEFAULT)
     )
 
     if conf < KP_CONF_HOLD:

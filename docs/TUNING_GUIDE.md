@@ -42,10 +42,10 @@
 
 관련 설정:
 
-- `KP_EMA_ENABLE`
-- `KP_EMA_ALPHA`
-- `KP_MIN_CONF`
-- `KP_ALPHA_BY_ID`
+- `KP_EMA_ENABLE` (환경변수)
+- `KP_MIN_CONF` (환경변수)
+- 아래는 `app/config.py` 상수
+- `KP_ALPHA_BY_ID`, `KP_ALPHA_DEFAULT`
 - `KP_CONF_HOLD`
 - `KP_CONF_MID`
 - `KP_ALPHA_MUL_LOW`
@@ -69,7 +69,7 @@
 증상별 힌트:
 
 - 낙상 순간 반응이 늦다
-  - `KP_EMA_ALPHA` 약간 낮춤
+  - `KP_ALPHA_BY_ID`(골반/어깨)와 `KP_ALPHA_DEFAULT`를 약간 낮춤
 - 손목/발목이 과하게 튄다
   - `KP_JUMP_RATIO_EXT` 낮추거나 `KP_JUMP_ALPHA_MUL` 높임
 - 낮은 confidence 프레임에서 흔들림이 심하다

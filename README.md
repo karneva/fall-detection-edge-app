@@ -445,7 +445,7 @@ LiveMode
 ### 장치 / 서버
 
 - `DEVICE_ID`
-- `DEVICE_NAME`
+- `RPI_SERIAL_NUMBER`, `ESP32_SERIAL_NUMBER`
 - `LOCATION_ID`
 - `SERVER_URL`
 - `WS_SERVER_URL`
@@ -468,8 +468,8 @@ LiveMode
 
 - `ABNORMAL_TIMEOUT_S`
 - `KP_EMA_ENABLE`
-- `KP_EMA_ALPHA`
 - `KP_MIN_CONF`
+- `AI_MODE`, `AI_MODEL_PATH`, `AI_SUPPRESS_PFALL_TH`, `AI_ESCALATE_S`, `AI_ESCALATE_REQUIRES_DROP`
 
 실제 알고리즘 세부 파라미터는 `Level1Params`, `PresenceParams`, 스무딩 모듈 내부에도 정의되어 있습니다.
 

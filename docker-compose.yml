@@ -24,7 +24,6 @@ services:
       - DETERMINISTIC=${DETERMINISTIC:-1}
       - USE_HALF=${USE_HALF:-0}
       - DEVICE_ID=${DEVICE_ID:-JETSON-EDGE-001}
-      - DEVICE_NAME=${DEVICE_NAME:-Jetson-Orin-Nano}
       - LOCATION_ID=${LOCATION_ID:-default-location}
       - SERVER_URL=${SERVER_URL:-https://your-backend.example.com}
       - WS_SERVER_URL=${WS_SERVER_URL:-}
@@ -44,7 +43,6 @@ services:
       - CLIP_RESIZE_HEIGHT=${CLIP_RESIZE_HEIGHT:-480}
       - CLIP_PRE_SEC=${CLIP_PRE_SEC:-6}
       - CLIP_POST_SEC=${CLIP_POST_SEC:-6}
-      - CLIP_COOLDOWN_S=${CLIP_COOLDOWN_S:-30.0}
       - ABNORMAL_TIMEOUT_S=${ABNORMAL_TIMEOUT_S:-10.0}
       - AI_MODE=${AI_MODE:-veto}
       - AI_MODEL_PATH=${AI_MODEL_PATH:-}
@@ -52,7 +50,6 @@ services:
       - AI_ESCALATE_S=${AI_ESCALATE_S:-60.0}
       - AI_ESCALATE_REQUIRES_DROP=${AI_ESCALATE_REQUIRES_DROP:-1}
       - KP_EMA_ENABLE=${KP_EMA_ENABLE:-1}
-      - KP_EMA_ALPHA=${KP_EMA_ALPHA:-0.5}
       - KP_MIN_CONF=${KP_MIN_CONF:-0.30}
 
     # (2) 카메라 디바이스 전달

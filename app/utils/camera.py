@@ -1,10 +1,9 @@
-import os
 import sys
 import cv2
 from typing import Optional
 import logging
 
-from ..config import CAM_INDEX, FRAME_W, FRAME_H
+from ..config import CAM_INDEX, CAM_DEVICE, FRAME_W, FRAME_H
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +27,8 @@ class CameraManager:
         if self.cap is not None and self.cap.isOpened():
             return self.cap
 
-        cam_device = os.getenv("CAM_DEVICE", "").strip()
-        cam_index = int(os.getenv("CAM_INDEX", str(CAM_INDEX)))
+        cam_device = CAM_DEVICE
+        cam_index = CAM_INDEX
 
         logger.info(f"Opening camera: index={cam_index}, device={cam_device}, platform={sys.platform}")
 

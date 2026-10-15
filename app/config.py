@@ -21,6 +21,8 @@ def _is_placeholder_url(url: str) -> bool:
 # ---------------------------------------------------------
 # 카메라 인덱스 (기본: 0)
 CAM_INDEX = int(os.getenv("CAM_INDEX", "0"))
+# 카메라 장치 경로 (예: /dev/video0). 지정하면 인덱스보다 우선
+CAM_DEVICE = os.getenv("CAM_DEVICE", "").strip()
 # 처리 프레임 해상도
 FRAME_W = int(os.getenv("FRAME_W", "1920"))
 FRAME_H = int(os.getenv("FRAME_H", "1080"))
@@ -42,9 +44,11 @@ MODEL_PATH = os.getenv("MODEL_PATH", "yolov8s-pose.pt")
 # ---------------------------------------------------------
 # 장치 식별 및 네트워크 설정
 # ---------------------------------------------------------
-# 장치 시리얼 번호 및 이름
+# 장치 시리얼 번호
 DEVICE_ID = os.getenv("DEVICE_ID", "JETSON-EDGE-001")
-DEVICE_NAME = os.getenv("DEVICE_NAME", "Jetson-Orin-Nano")
+# 페어링 시 함께 등록되는 하위 장치 시리얼 번호
+RPI_SERIAL_NUMBER = os.getenv("RPI_SERIAL_NUMBER", "RPI-EDGE-001")
+ESP32_SERIAL_NUMBER = os.getenv("ESP32_SERIAL_NUMBER", "ESP32-EDGE-001")
 # 설치 장소 에칭
 LOCATION_ID = os.getenv("LOCATION_ID", "default-location")
 # 통합 백엔드 API 서버 URL
@@ -93,8 +97,6 @@ CLIP_RESIZE_HEIGHT = int(os.getenv("CLIP_RESIZE_HEIGHT", "480"))
 # 사고 시점 기준 전후 녹화 시간 (초)
 CLIP_PRE_SEC = int(os.getenv("CLIP_PRE_SEC", "6"))
 CLIP_POST_SEC = int(os.getenv("CLIP_POST_SEC", "6"))
-# 전송 후 재녹화 방지 쿨다운 시간
-CLIP_COOLDOWN_S = float(os.getenv("CLIP_COOLDOWN_S", "30.0"))
 
 # ---------------------------------------------------------
 # 낙상 감지 센서 튜닝 파라미터
@@ -120,7 +122,6 @@ AI_ESCALATE_REQUIRES_DROP = _env_flag("AI_ESCALATE_REQUIRES_DROP", True)
 # EMA(Exponential Moving Average) 스무딩 설정
 # ---------------------------------------------------------
 KP_EMA_ENABLE = os.getenv("KP_EMA_ENABLE", "1") == "1"
-KP_EMA_ALPHA = float(os.getenv("KP_EMA_ALPHA", "0.5"))
 # 신뢰도에 따른 스무딩 적용 최소 기준점
 KP_MIN_CONF_FOR_SMOOTH = float(os.getenv("KP_MIN_CONF", "0.30"))
 

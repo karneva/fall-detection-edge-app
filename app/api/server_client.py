@@ -10,6 +10,9 @@ from typing import Optional, Dict, Any, Tuple
 import os
 
 from ..config import (
+    DEVICE_ID,
+    RPI_SERIAL_NUMBER,
+    ESP32_SERIAL_NUMBER,
     ENABLE_DEVICE_PAIRING,
     ENABLE_RPI_EVENTS,
     ENABLE_SERVER_REPORTING,
@@ -52,11 +55,11 @@ class ServerClient:
             child_devices = [
                 {"serial_number": device_id, "device_type": "JETSON"},
                 {
-                    "serial_number": os.getenv("RPI_SERIAL_NUMBER", "RPI-EDGE-001"),
+                    "serial_number": RPI_SERIAL_NUMBER,
                     "device_type": "RPI",
                 },
                 {
-                    "serial_number": os.getenv("ESP32_SERIAL_NUMBER", "ESP32-EDGE-001"),
+                    "serial_number": ESP32_SERIAL_NUMBER,
                     "device_type": "ESP32",
                 }
             ]
@@ -106,7 +109,7 @@ class ServerClient:
         try:
             url = f"{self.server_url}/api/iot/auth/refresh"
             payload = {
-                "serial_number": os.getenv("DEVICE_ID", "JETSON-EDGE-001"),
+                "serial_number": DEVICE_ID,
                 "refresh_Token": refresh_token
             }
             resp = requests.post(url, json=payload, timeout=self.timeout)
