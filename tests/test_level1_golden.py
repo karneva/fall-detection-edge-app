@@ -93,8 +93,8 @@ class Level1GoldenTraceTest(unittest.TestCase):
 if __name__ == "__main__":
     if "--regen" in sys.argv:
         GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-        GOLDEN_PATH.write_text(json.dumps(generate(), ensure_ascii=False, indent=1, sort_keys=True) + "\n",
-                               encoding="utf-8")
+        with open(GOLDEN_PATH, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(generate(), ensure_ascii=False, indent=1, sort_keys=True) + "\n")
         print(f"wrote {GOLDEN_PATH}")
     else:
         unittest.main()

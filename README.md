@@ -219,8 +219,7 @@ AI 분류기가 `ADL`로 판정하면 규칙 기반 탐지를 억제하고 `ai_s
 ├── requirements.txt
 ├── requirements-dev.txt    # 테스트용 의존성
 ├── benchmark_models.py     # 모델 벤치마크 도구
-├── export_tensorrt.py      # TensorRT 변환 스크립트
-└── test_token_refresh.py   # 토큰 갱신 로직 테스트
+└── export_tensorrt.py      # TensorRT 변환 스크립트
 ```
 
 ### 테스트 실행
