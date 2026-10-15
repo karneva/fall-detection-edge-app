@@ -22,6 +22,7 @@ RUNTIME_MODULES = (
     "app.api.server_client",
     "app.api.streamer",
     "app.core.level1",
+    "app.core.presence",
     "app.core.kp_buffer",
     "app.core.obs_schema",
     "app.core.event_sidecar",
