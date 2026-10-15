@@ -1,0 +1,5 @@
+# 오프라인 학습/데이터 준비용 (GPU 학습 머신). Jetson 런타임에는 필요 없음
+# torch는 CUDA 버전에 맞춰 https://pytorch.org 안내대로 별도 설치
+numpy
+ultralytics
+tqdm

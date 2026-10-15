@@ -10,6 +10,4 @@ ultralytics
 scipy
 pyzbar
 
-# Utilities / training scripts
-tqdm
-paho-mqtt
+# 학습 도구는 requirements-train.txt, 테스트는 requirements-dev.txt

@@ -4,12 +4,12 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import os
-from .model import Fall1DCNN
+from app.ai_classifier.model import Fall1DCNN
+from training.paths import DATA_DIR, WEIGHTS_DIR
 
 # 설정
-DATA_PATH = "app/ai_classifier/data"
-MODEL_SAVE_PATH = "app/ai_classifier/weights"
-os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
+DATA_PATH = str(DATA_DIR)
+MODEL_SAVE_PATH = str(WEIGHTS_DIR)
 
 BATCH_SIZE = 32
 LEARNING_RATE = 0.001
@@ -21,6 +21,7 @@ def load_data(phase):
     return torch.from_numpy(X).float(), torch.from_numpy(y).long()
 
 def train():
+    os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
     # 데이터 로드 (이미 영상 단위로 나누어져 있음)
     X_train, y_train = load_data("train")
     X_val, y_val = load_data("val")

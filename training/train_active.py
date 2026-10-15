@@ -5,13 +5,13 @@ from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import os
 from pathlib import Path
-from .model import Fall1DCNN
+from app.ai_classifier.model import Fall1DCNN
+from training.paths import ACTIVE_DATA_DIR, DATA_DIR, WEIGHTS_DIR
 
 # 설정
-DATA_PATH = "app/ai_classifier/data"
-ACTIVE_DATA_PATH = "app/ai_classifier/data/active_learning"
-MODEL_SAVE_PATH = "app/ai_classifier/weights"
-os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
+DATA_PATH = str(DATA_DIR)
+ACTIVE_DATA_PATH = str(ACTIVE_DATA_DIR)
+MODEL_SAVE_PATH = str(WEIGHTS_DIR)
 
 BATCH_SIZE = 32
 LEARNING_RATE = 0.0005 # 데이터가 추가되었으므로 세밀한 학습을 위해 LR을 조금 낮춤
@@ -61,6 +61,7 @@ def load_active_learning_arrays(active_dir: str):
     return np.concatenate(x_parts, axis=0), np.concatenate(y_parts, axis=0)
 
 def train_active():
+    os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
     # 1. 기초 데이터 로드
     X_train, y_train = load_data("train")
     X_val, y_val = load_data("val")

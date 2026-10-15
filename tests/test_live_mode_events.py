@@ -17,8 +17,7 @@ from app.core.event_sidecar import build_sidecar, sidecar_filename, write_sideca
 from app.core.level1 import Level1Engine, Level1Params
 from app.eval.synth import CountingVerifier, make_scenario
 
-STUB_MODULES = ("cv2", "torch", "ultralytics", "requests", "websocket", "pyzbar", "pyzbar.pyzbar", "paho",
-                "paho.mqtt", "paho.mqtt.client")
+STUB_MODULES = ("cv2", "torch", "ultralytics", "requests", "websocket", "pyzbar", "pyzbar.pyzbar")
 
 
 def _load_live_mode(clip_dir: str):

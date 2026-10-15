@@ -1,15 +1,22 @@
+"""
+영상(mp4) 폴더 -> 30프레임 키포인트 시퀀스 배열 (액티브 러닝용 추가 데이터)
+
+  python -m training.video_to_data --input-dir runs/clips/not_fall --label 0 --prefix not_fall
+"""
+import argparse
+import glob
 import os
+
 import cv2
 import numpy as np
+from tqdm import tqdm
 from ultralytics import YOLO
 
 from app.ai_classifier.features import normalize_frame_v1 as normalize_keypoints
-from tqdm import tqdm
-import glob
-import argparse
+from training.paths import ACTIVE_DATA_DIR, RUNS_NOT_FALL_CLIPS, YOLO_POSE_MODEL
 
 # 설정
-MODEL_PATH = "yolov8s-pose.pt"
+MODEL_PATH = YOLO_POSE_MODEL
 SEQ_LEN = 30
 
 
@@ -72,14 +79,14 @@ def save_samples(X, y, save_dir, prefix):
     np.save(os.path.join(save_dir, f"y_{prefix}.npy"), y)
     print(f"Saved {len(X)} samples to {save_dir} with prefix '{prefix}'")
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Extract pose sequences from videos into NumPy arrays")
-    parser.add_argument("--input-dir", default="runs/clips/not_fall", help="Folder containing source videos")
+    parser.add_argument("--input-dir", default=str(RUNS_NOT_FALL_CLIPS), help="Folder containing source videos")
     parser.add_argument("--label", type=int, default=0, help="Class label: 0=ADL, 1=Fall")
     parser.add_argument("--prefix", default="not_fall", help="Output file prefix, e.g. not_fall or custom_fall")
-    parser.add_argument("--save-dir", default="app/ai_classifier/data/active_learning", help="Directory to save .npy arrays")
+    parser.add_argument("--save-dir", default=str(ACTIVE_DATA_DIR), help="Directory to save .npy arrays")
     parser.add_argument("--model-path", default=MODEL_PATH, help="YOLO pose model path")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if os.path.exists(args.input_dir):
         X_new, y_new = collect_from_folder(args.input_dir, label=args.label, model_path=args.model_path)
@@ -92,3 +99,7 @@ if __name__ == "__main__":
             print("No valid samples found in video files.")
     else:
         print(f"Directory not found: {args.input_dir}")
+
+
+if __name__ == "__main__":
+    main()

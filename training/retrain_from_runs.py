@@ -1,7 +1,14 @@
+"""
+운영 중 저장된 not_fall 클립을 학습 배열로 변환하고 액티브 러닝 재학습까지 실행합니다.
+
+  python -m training.retrain_from_runs
+"""
 import argparse
 import subprocess
 import sys
 from pathlib import Path
+
+from training.paths import ACTIVE_DATA_DIR, RUNS_NOT_FALL_CLIPS, YOLO_POSE_MODEL
 
 
 def run_step(cmd):
@@ -15,7 +22,7 @@ def main():
     )
     parser.add_argument(
         "--input-dir",
-        default="runs/clips/not_fall",
+        default=str(RUNS_NOT_FALL_CLIPS),
         help="Folder containing false-positive clips",
     )
     parser.add_argument(
@@ -25,12 +32,12 @@ def main():
     )
     parser.add_argument(
         "--save-dir",
-        default="app/ai_classifier/data/active_learning",
+        default=str(ACTIVE_DATA_DIR),
         help="Directory for generated NumPy arrays",
     )
     parser.add_argument(
         "--model-path",
-        default="yolov8s-pose.pt",
+        default=YOLO_POSE_MODEL,
         help="YOLO pose model path used for extraction",
     )
     args = parser.parse_args()
@@ -43,7 +50,7 @@ def main():
         [
             sys.executable,
             "-m",
-            "app.ai_classifier.video_to_data",
+            "training.video_to_data",
             "--input-dir",
             str(input_dir),
             "--label",
@@ -57,7 +64,7 @@ def main():
         ]
     )
 
-    run_step([sys.executable, "-m", "app.ai_classifier.train_active"])
+    run_step([sys.executable, "-m", "training.train_active"])
 
 
 if __name__ == "__main__":

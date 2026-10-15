@@ -1,18 +1,24 @@
+"""
+URFD 프레임 폴더 -> 30프레임 키포인트 시퀀스 학습 배열(X_train/val.npy, y_train/val.npy)
+
+  python -m training.dataset_builder
+"""
+import glob
 import os
+import random
+
 import numpy as np
+from tqdm import tqdm
 from ultralytics import YOLO
 
 from app.ai_classifier.features import normalize_frame_v1 as normalize_keypoints
-from tqdm import tqdm
-import glob
-import random
+from training.paths import DATA_DIR, URFD_ROOT, YOLO_POSE_MODEL
 
 # 설정
-DATASET_ROOT = "dataset/URFD"
-SAVE_PATH = "app/ai_classifier/data"
-os.makedirs(SAVE_PATH, exist_ok=True)
+DATASET_ROOT = str(URFD_ROOT)
+SAVE_PATH = str(DATA_DIR)
 
-MODEL_PATH = "yolov8s-pose.pt"
+MODEL_PATH = YOLO_POSE_MODEL
 SEQ_LEN = 30
 VAL_RATIO = 0.2
 
@@ -27,6 +33,7 @@ def extract_keypoints(model, img_path):
     return normalize_keypoints(kps)
 
 def build_dataset():
+    os.makedirs(SAVE_PATH, exist_ok=True)
     model = YOLO(MODEL_PATH)
     
     categories = {"Fall": 1, "ADL": 0}
