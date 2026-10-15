@@ -205,8 +205,7 @@ class SyntheticBaselineTest(unittest.TestCase):
     def test_committed_baseline_still_holds(self):
         """커밋된 합성 baseline 대비 recall 하락/FA 증가가 없어야 함 (엔진 회귀 감지)."""
         base_path = Path(__file__).resolve().parents[1] / "eval" / "baselines" / "synthetic_v0.json"
-        if not base_path.exists():
-            self.skipTest("baseline not generated")
+        self.assertTrue(base_path.exists(), f"missing committed baseline {base_path}")
         base = json.loads(base_path.read_text(encoding="utf-8"))
         modes = list(base["modes"])
         # 환경변수(AI_ESCALATE_S 등)에 따라 기본값이 바뀌지 않도록 baseline 당시 파라미터로 고정
