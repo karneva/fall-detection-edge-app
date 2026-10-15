@@ -3,11 +3,11 @@ import time
 import logging
 from typing import Optional, Dict, Any, Tuple
 
-from ..media.camera import CameraManager
-from ..media.jpeg import encode_jpeg
-from ..state.device_state import get_device_state
-from ..config import DEVICE_ID, LOCATION_ID, RUNS_DIR, JPEG_QUALITY
-from ..modes.base_mode import BaseMode
+from .media.camera import CameraManager
+from .media.jpeg import encode_jpeg
+from .state.device_state import get_device_state
+from .config import DEVICE_ID, LOCATION_ID, RUNS_DIR, JPEG_QUALITY
+from .modes.base_mode import BaseMode
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class AppController:
 
         is_registered = self.device_state.is_registered()
 
-        from ..modes import QRMode
+        from .modes import QRMode
         if QRMode is not None and not is_registered:
             logger.info("Device not registered. Switching to QRMode.")
             self.camera_manager.configure(width=640, height=480)
@@ -114,7 +114,7 @@ class AppController:
             return None
 
         self.camera_manager.configure(width=1920, height=1080)
-        from ..modes import LiveMode
+        from .modes import LiveMode
         mode = LiveMode(model=model, cap=cap, jpeg_quality=JPEG_QUALITY)
         self.set_processing_mode("live")
         return mode
@@ -263,7 +263,7 @@ class AppController:
                 self.frame_count_overlay += 1
                 self.cond_overlay.notify_all()
 
-        from ..media.replay import start_replay_thread
+        from .media.replay import start_replay_thread
         self.replay_thread = start_replay_thread(
             path=path,
             fps=fps,
@@ -284,7 +284,7 @@ class AppController:
             self.replay_running = False
 
             # 원래 실행 중이던 모드로 상태 전환
-            from ..modes.live_mode import LiveMode
+            from .modes.live_mode import LiveMode
             if self.current_mode:
                 mode_name = "live" if isinstance(self.current_mode, LiveMode) else "qr"
                 self.set_processing_mode(mode_name)

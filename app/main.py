@@ -14,8 +14,8 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from ultralytics import YOLO
 
 from .config import MODEL_PATH, DETERMINISTIC
-from .core.controller import AppController
-from .core.streamer import WebSocketStreamer
+from .controller import AppController
+from .api.streamer import WebSocketStreamer
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
