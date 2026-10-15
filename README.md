@@ -209,7 +209,7 @@ AI 분류기가 `ADL`로 판정하면 규칙 기반 탐지를 억제하고 `ai_s
 │   ├── engine/             # YOLO 추론 파이프라인, 스무딩
 │   ├── modes/              # QR 모드, Live 모드
 │   ├── state/              # 장치 등록 상태 저장
-│   ├── utils/              # 카메라, 리플레이, 메트릭 유틸
+│   ├── utils/              # 카메라, 리플레이 유틸
 │   ├── config.py           # 환경 변수 기반 설정
 │   └── main.py             # FastAPI 엔트리포인트
 ├── docs/                   # 상세 기술 문서
