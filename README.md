@@ -1,393 +1,272 @@
 # Fall Detection Edge App
 
-Jetson Orin Nano 환경에서 동작하는 실시간 낙상 감지 엣지 애플리케이션입니다.  
-카메라 영상에서 사람의 자세를 추출한 뒤, 1차 규칙 기반 판단과 2차 딥러닝 분류를 결합해 낙상 여부를 판정합니다.
+**Jetson Orin Nano 위에서 카메라 한 대로 사람의 낙상을 실시간 감지하는 엣지 애플리케이션**
 
-이 저장소는 단순한 모델 추론 데모가 아니라, 실제 현장 장치 관점의 흐름을 포함합니다.
+![Jetson Orin Nano](https://img.shields.io/badge/Jetson-Orin%20Nano-76B900?logo=nvidia&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-1D%20CNN-EE4C2C?logo=pytorch&logoColor=white)
+![YOLOv8 Pose](https://img.shields.io/badge/YOLOv8-Pose-111F68)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 
-- 장치 미등록 시 QR 페어링 모드로 시작
-- 등록 완료 후 실시간 감시 모드로 자동 전환
-- YOLO Pose 기반 키포인트 추출
-- 좌표 변화 기반 1차 낙상 의심 탐지
-- 1D CNN 기반 2차 낙상/일상행동 재검증
-- 사고 전후 영상 클립 저장
-- 백엔드 서버 및 하위 장치(Raspberry Pi) 이벤트 전송
-- MJPEG 스트리밍과 WebSocket 프레임 릴레이 지원
+YOLOv8-Pose로 사람의 관절 좌표를 뽑고, **규칙 기반 상태 머신이 빠르게 낙상을 의심**한 뒤
+**1D CNN이 키포인트 시계열을 보고 한 번 더 검증**합니다. 확정되면 보호자 장치(Raspberry Pi)와 서버에 알리고 사고 전후 영상을 업로드합니다.
 
-## 공개 범위
+> 목표: 실제 낙상은 놓치지 않으면서(높은 recall), 침대에 눕기·빨리 앉기 같은 일상 동작의 오탐은 줄이기
 
-이 저장소는 코드 중심으로 정리된 공개용 버전입니다.
+---
 
-포함하는 것:
+## 한눈에 보기
 
-- 애플리케이션 코드
-- 실행/운영 문서
-- Docker 기반 실행 설정
-- 테스트 및 보조 스크립트
+```mermaid
+flowchart LR
+    CAM["카메라<br/>1920x1080"] --> YOLO["YOLOv8-Pose<br/>관절 17개 추출"]
 
-포함하지 않는 것:
+    subgraph JETSON["Jetson Orin Nano (app/)"]
+        YOLO --> OBS["Observation<br/>표준화 + EMA 스무딩"]
+        OBS --> RULE["1차 판단<br/>규칙 기반 상태 머신"]
+        RULE -- "낙상 의심이 지속되면" --> AI["2차 검증<br/>1D CNN (p_fall)"]
+        OBS --> BUF[("키포인트 버퍼<br/>사건 구간 기록")]
+    end
 
-- 대용량 원본 영상
-- 런타임 중 생성되는 `runs/` 산출물
-- 학습용 중간 데이터 배열
-- 학습 완료 가중치 파일
-- TensorRT 엔진 등 대용량 모델 산출물
+    AI -- "낙상 확정" --> ALARM["알람"]
+    AI -. "일상 동작으로 판단<br/>(억제 후 계속 감시)" .-> RULE
 
-즉, 이 저장소의 목적은 "모델 파일 배포"보다 "시스템 구조와 구현 방식 설명"에 가깝습니다.
-
-## 프로젝트 목적
-
-이 프로젝트의 목표는 사람의 낙상을 가능한 한 빠르게 감지하면서도, 단순 자세 변화나 일상 동작을 낙상으로 오인하는 비율을 줄이는 것입니다.
-
-이를 위해 시스템은 두 단계로 동작합니다.
-
-1. 빠른 1차 판단
-좌표, 자세 비율, 중심 이동, 어깨 하강, 저자세 지속 여부를 이용해 낙상 의심 상황을 탐지합니다.
-
-2. 느리지만 더 신중한 2차 판단
-최근 30프레임의 키포인트 시퀀스를 1D CNN 분류기에 넣어, 규칙 기반 탐지 결과를 다시 검증합니다.
-
-즉, 이 프로젝트는 "실시간성"과 "오탐 억제" 사이의 균형을 맞추는 엣지 비전 시스템입니다.
-
-## 학습 데이터 출처
-
-2차 검증용 1D CNN 분류기는 아래 데이터를 기반으로 학습했습니다.
-
-- 공개 낙상 데이터셋 `URFD`
-- 직접 촬영한 낙상/비낙상 포즈 데이터
-
-직접 촬영 데이터는 실제 사용 환경과 카메라 시점에 더 가깝게 맞추기 위한 보완 데이터로 활용했습니다.  
-공개 저장소에는 데이터 원본과 대용량 학습 산출물은 포함하지 않고, 코드와 문서만 유지합니다.
-
-## 시스템 개요
-
-전체 흐름은 아래와 같습니다.
-
-```text
-카메라 입력
-  -> 실행 모드 선택
-     -> QRMode: 장치 등록용 QR 스캔
-     -> LiveMode: 실시간 낙상 감시
-  -> YOLO Pose 추론
-  -> Observation 표준화
-  -> EMA 스무딩
-  -> Level1Engine 규칙 기반 판단
-  -> FallClassifier 2차 검증
-  -> 이벤트 전송 / 클립 저장 / 스트리밍
+    ALARM --> RPI["Raspberry Pi<br/>현장 알림"]
+    ALARM --> SERVER["백엔드 서버<br/>이벤트 + 영상 업로드"]
+    ALARM --> RUNS[("runs/<br/>클립 · sidecar")]
+    BUF --> RUNS
 ```
 
-### 실행 모드
+| 단계 | 하는 일 | 위치 |
+| --- | --- | --- |
+| 자세 추출 | YOLOv8-Pose로 가장 확실한 1명의 관절 17개 좌표 추출, 대상 전환 감지 | `app/engine/` |
+| 1차 판단 | 하강 속도·자세 비율·어깨 하강·높이 붕괴를 조합해 낙상 의심 → 확정 | `app/core/level1.py` |
+| 2차 검증 | 키포인트 30프레임을 1D CNN에 넣어 낙상 확률 `p_fall` 계산 | `app/ai_classifier/` |
+| 알림·기록 | RPI/서버 이벤트, 사고 전후 MP4 업로드, 판정 근거(sidecar) 저장 | `app/modes/live_mode.py` |
 
-이 애플리케이션은 시작 시 등록 상태를 확인하고 자동으로 모드를 선택합니다.
+## 동작 방식
 
-- `QRMode`
-  장치가 아직 서버에 등록되지 않은 경우 실행됩니다. 카메라 프레임에서 QR 코드를 읽고, 서버에 페어링 요청을 보냅니다.
-- `LiveMode`
-  장치가 이미 등록된 경우 실행됩니다. YOLO Pose 추론, 재실 감지, 낙상 판단, 클립 저장, 이벤트 전송을 수행합니다.
+### 1. 장치 시작: QR 페어링 → 실시간 감시
 
-QR 등록이 완료되면 프로세스를 재시작하지 않아도 `QRMode -> LiveMode`로 자동 전환됩니다.
+앱은 시작할 때 장치 등록 상태를 보고 모드를 고릅니다. QR로 등록을 마치면 재시작 없이 감시 모드로 넘어갑니다.
 
-## 핵심 아이디어
+```mermaid
+flowchart LR
+    START(["앱 시작"]) --> CHECK{"장치가<br/>등록되어 있나?"}
+    CHECK -- "아니오" --> QR["QRMode<br/>카메라로 QR 인식"]
+    QR --> PAIR["서버 페어링<br/>토큰 저장"]
+    PAIR --> LIVE
+    CHECK -- "예" --> LIVE["LiveMode<br/>실시간 낙상 감시"]
+```
 
-### 1. 1차 낙상 판단: 규칙 기반 엔진
+### 2. 낙상 판단 상태 머신
 
-`app/core/level1.py`의 `Level1Engine`이 핵심입니다.
+한 프레임만 보고 판단하지 않습니다. **의심 → 지속 확인 → AI 검증 → 확정** 순서로 상태가 바뀝니다.
 
-이 엔진은 한 프레임만 보고 판단하지 않고, 상태 전이 방식으로 동작합니다.
+```mermaid
+stateDiagram-v2
+    state "정상 NORMAL" as NORMAL
+    state "낙상 의심 ABNORMAL" as ABNORMAL
+    state "AI 검증 (1D CNN)" as AI_CHECK
+    state "억제 후 감시" as WATCH
+    state "낙상 확정 LEVEL1" as LEVEL1
 
-- `NORMAL`
-  정상 상태
-- `ABNORMAL`
-  낙상 의심 상태
-- `LEVEL1`
-  낙상 확정 상태
+    [*] --> NORMAL
+    NORMAL --> ABNORMAL: ① 낙상 신호
+    ABNORMAL --> NORMAL: ② 다시 일어남
+    ABNORMAL --> AI_CHECK: ③ 쓰러진 채 정지
+    AI_CHECK --> LEVEL1: ④ 낙상
+    AI_CHECK --> WATCH: ⑤ 일상 동작
+    WATCH --> NORMAL: ② 다시 일어남
+    WATCH --> LEVEL1: ⑥ 오래 쓰러져 있음
+    LEVEL1 --> NORMAL: ⑦ 쿨다운
+```
 
-판단에 사용하는 주요 신호는 다음과 같습니다.
+| 전이 | 조건 (기본값) |
+| --- | --- |
+| ① 낙상 신호 | 아래 신호 중 2개 이상이 0.35초 지속, 또는 누운 자세가 45프레임 지속 |
+| ② 다시 일어남 | 서 있는 자세로 2초 회복 |
+| ③ 쓰러진 채 정지 | 10초간 움직임 없음, 또는 10초 경과 + 자세 붕괴 확인 |
+| ④ 낙상 | AI의 낙상 확률 `p_fall > 0.4`, 또는 AI가 판단할 수 없음 (fail-open) |
+| ⑤ 일상 동작 | `p_fall ≤ 0.4` → 알람을 보류하고 계속 감시 |
+| ⑥ 오래 쓰러져 있음 | 보류 후 60초 넘게 쓰러져 있고, 진입 시 급하강이 있었음 → AI와 무관하게 알람 |
+| ⑦ 쿨다운 | 알람 후 25초 |
 
-- 사람 바운딩 박스 중심의 급격한 하강
-- 세로/가로 비율 변화
-- 어깨 키포인트의 빠른 하강
-- 저자세가 일정 시간 이상 유지되는지 여부
-- 낙상 이후 정지 상태가 지속되는지 여부
-- 대상 스위칭 발생 여부
+판단에 쓰는 신호:
 
-이 구조 덕분에 단순히 앉거나 허리를 굽히는 동작과 실제 낙상 가능 상황을 구분하려고 시도합니다.
+- **하강 속도**: 사람 박스 중심이 빠르게 내려감
+- **자세 비율**: 세로로 길던 박스가 가로로 눕는 형태로 바뀜
+- **어깨 하강**: 어깨 관절이 빠르게 내려감
+- **높이 붕괴**: 박스 높이가 평소보다 크게 줄어듦
+- **정지 지속**: 쓰러진 뒤 움직임이 거의 없음
 
-### 2. 2차 낙상 판단: 딥러닝 재검증
+### 3. AI 2차 검증은 알람을 "조용히" 지우지 못하게 설계
 
-규칙 기반 엔진이 `LEVEL1`로 가기 직전, 최근 30프레임의 키포인트 시퀀스를 1D CNN 분류기에 전달합니다.
+딥러닝 모델이 틀려도 실제 낙상 알람이 사라지지 않도록, 판단이 불확실하면 항상 규칙 기반 결과(알람)를 따릅니다.
 
-- 입력: 17개 키포인트 x/y 좌표 시퀀스
-- 정규화: 골반 중심 기준 상대좌표화
-- 출력: `Fall` 또는 `ADL(일상행동)`
+```mermaid
+flowchart TD
+    IN(["규칙 엔진이 낙상 확정 직전"]) --> MODE{"AI_MODE"}
+    MODE -- "off" --> ALARM["알람"]
+    MODE -- "veto / shadow" --> LOADED{"가중치 로드됨?<br/>추론 성공?<br/>값이 0~1?"}
+    LOADED -- "아니오 (fail-open)" --> ALARM
+    LOADED -- "예" --> P{"p_fall ≤ 0.4 ?"}
+    P -- "아니오, 또는 shadow 모드" --> ALARM
+    P -- "예, veto 모드" --> SUP["알람 보류<br/>억제 후 감시"]
+    SUP -- "60초 넘게 쓰러져 있으면" --> ALARM
+```
 
-AI 분류기가 `ADL`로 판정하면 규칙 기반 탐지를 억제하고 `ai_suppressed` 이벤트로 기록합니다.  
-즉, 이 저장소의 핵심 설계는 "좌표 기반 1차 탐지 + 딥러닝 2차 필터"입니다.
+- `veto`: AI가 일상 동작이라고 하면 알람을 보류 (기본값)
+- `shadow`: AI 판단은 기록만 하고 알람은 규칙대로 (현장 검증용)
+- `off`: AI를 쓰지 않음
 
-### 3. 영상 클립 저장
+### 4. 낙상 한 건이 처리되는 과정
 
-낙상 의심 시점 전후 구간을 저장하기 위해 링버퍼 기반 `ClipRecorder`를 사용합니다.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as 카메라 + YOLO
+    participant E as 낙상 엔진
+    participant A as 1D CNN
+    participant L as LiveMode
+    participant O as RPI · 서버
 
-- 평소에는 최근 프레임을 JPEG로 압축해서 메모리에 유지
-- 사고 확정 시 `pre/post` 구간을 잘라 MP4로 저장
-- AI에 의해 반려된 사례도 `not_fall` 데이터로 저장 가능
+    C->>E: 매 프레임 관절 좌표
+    Note over E: 급하강 + 자세 변화 감지
+    E->>L: abnormal_enter (사건 시작 시각 기록)
+    Note over E: 진입 -1.5초 ~ +2.5초<br/>키포인트 구간 저장
+    Note over E: 10초간 움직임 없음
+    E->>A: 최근 30프레임 키포인트
+    A-->>E: p_fall = 0.93
+    E->>L: level1 (낙상 확정)
+    L->>O: 낙상 이벤트 전송
+    Note over L: 사고 전후 12초 MP4 저장<br/>판정 근거 sidecar 저장
+    L->>O: 영상 업로드
+```
 
-이 구조는 사후 확인, 액티브 러닝, 데이터셋 축적에 유리합니다.
+## 빠른 시작
 
-## 주요 컴포넌트
+### Docker Compose (Jetson)
 
-### 앱 진입점
+```bash
+cp .env.example .env          # 서버/RPI 없이 실행하려면 ENABLE_* 값을 0으로
+docker compose up -d --build
+curl http://localhost:8000/health
+```
 
-- `app/main.py`
-  FastAPI 앱 생성, 컨트롤러 시작/종료, API 라우트 정의
+기본 설정: 컨테이너 `jetson-edge`, 포트 `8000`, 카메라 `/dev/video0`, `runs/` 호스트 마운트, NVIDIA 런타임.
+PyTorch/CUDA는 베이스 이미지(`dustynv/pytorch`)가 제공합니다.
 
-### 실행 제어
+### 로컬 실행
 
-- `app/controller.py`
-  애플리케이션의 실제 메인 루프입니다.
-  카메라 열기, 현재 모드 선택, 프레임 버퍼 갱신, 리플레이, JSONL 레코딩을 담당합니다.
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt   # + 환경에 맞는 torch
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
 
-### 실행 모드
+### 주요 API
 
-- `app/modes/qr_mode.py`
-  QR 인식 및 서버 페어링 담당
-- `app/modes/live_mode.py`
-  실시간 감시 모드 담당
-- `app/modes/base_mode.py`
-  모든 모드의 공통 인터페이스
+| Method | Endpoint | 설명 |
+| --- | --- | --- |
+| GET | `/health` | 앱 상태 (모드, 등록 여부, AI 분류기 상태, 처리 FPS) |
+| GET | `/level1/status` | 최근 낙상 이벤트, 클립 레코더 상태 |
+| GET | `/pose` | 가장 최근 Observation |
+| GET | `/api/iot/device/falls/stream_overlay` | 분석 오버레이 MJPEG 스트림 |
+| GET | `/api/iot/device/falls/stream` | 원본 MJPEG 스트림 |
+| POST | `/record/start`, `/record/stop` | Observation JSONL 녹화 (오프라인 평가용) |
+| POST | `/replay/start?path=...&fps=15`, `/replay/stop` | 녹화본 리플레이 |
 
-### 추론 파이프라인
+설정은 모두 환경변수로 바꿀 수 있습니다. 전체 목록은 [`.env.example`](.env.example), 튜닝 방법은 [TUNING_GUIDE](docs/TUNING_GUIDE.md)를 보세요.
 
-- `app/engine/live.py`
-  카메라 프레임 읽기, YOLO Pose 추론, 대상 선택, Observation 생성, 시각화
-- `app/engine/smoothing.py`
-  키포인트 EMA 스무딩
+## 평가와 테스트
 
-### 낙상 판단
+모델이나 파라미터를 바꿀 때마다 **이벤트 단위 지표**(낙상 탐지율, 시간당 오탐, 알람 지연)로 비교하고,
+기준보다 나빠지면 채택하지 않습니다.
 
-- `app/core/level1.py`
-  규칙 기반 낙상 판단 엔진과 AI 2차 검증 게이트 (표준 라이브러리만 사용)
-- `app/core/presence.py`
-  재실(입/퇴실) 감지
-- `app/core/kp_buffer.py`, `app/core/event_sidecar.py`
-  사건 구간 원시 키포인트 기록, 이벤트 sidecar 저장
-- `app/ai_classifier/model.py`
-  1D CNN 모델 정의
-- `app/ai_classifier/inference.py`
-  2차 분류기 로딩(fail-open) 및 추론
-- `app/ai_classifier/features.py`
-  학습과 운영이 공유하는 입력 특징(정규화) 구현
+```mermaid
+flowchart LR
+    REC["장치에서 녹화<br/>/record/start"] --> LBL["라벨 작성<br/>낙상 시작/끝 시각"]
+    LBL --> RE["replay_eval<br/>엔진 오프라인 재생"]
+    RE --> CMP{"compare_results<br/>baseline 대비"}
+    CMP -- "탐지율 유지 + 오탐 비증가" --> OK["채택"]
+    CMP -- "하나라도 악화" --> NO["거부"]
+```
 
-### 데이터 구조
+```bash
+# 녹화 데이터 평가 (규칙만 vs 규칙 + AI)
+python -m app.eval.replay_eval --labels eval/labels.jsonl --name field_v1
+python -m app.eval.compare_results <baseline.json> runs/eval/field_v1_<sha>.json
 
-- `app/core/obs_schema.py`
-  YOLO 결과를 공통 Observation 구조로 변환
+# 데이터 없이 엔진 동작 확인 (합성 시나리오)
+python -m app.eval.replay_eval --synthetic
 
-### 영상 입출력
+# 테스트 (판단 엔진은 표준 라이브러리만으로 동작, numpy/torch 테스트는 없으면 skip)
+python -m unittest discover -s tests -t .
+```
 
-- `app/media/clip_recorder.py`
-  사고 전후 프레임 저장 및 MP4 생성
-- `app/media/camera.py`
-  OS별 카메라 열기, 해상도 설정, 오토포커스 제어
-- `app/media/replay.py`
-  저장된 Observation JSONL 기반 리플레이
-- `app/media/jpeg.py`
-  JPEG 인코딩
+테스트에는 리팩토링 안전망인 **golden trace**(합성 시나리오 180개의 엔진 이벤트 전체 비교)와
+AI 실패 시 알람이 유지되는지 확인하는 **fail-open 테스트**가 포함되어 있습니다.
 
-### 장치 상태 / 외부 통신
+## 학습 데이터와 재학습
 
-- `app/state/device_state.py`
-  등록 상태, 토큰, 갱신 정보 저장
-- `app/api/server_client.py`
-  페어링, 이벤트 보고, 토큰 갱신, 업로드 API 호출
-- `app/api/streamer.py`
-  원본 프레임을 WebSocket으로 백엔드에 릴레이
+- 공개 데이터셋 **URFD**와 직접 촬영한 낙상/일상 동작 데이터로 1D CNN을 학습했습니다.
+- AI가 일상 동작으로 판단한 사건은 `runs/clips/not_fall/`과 `runs/events/`에 쌓여 재학습 재료가 됩니다.
 
-### 오프라인 도구 (장치 런타임과 분리)
+```bash
+pip install -r requirements-train.txt     # + CUDA에 맞는 torch (GPU 학습 머신)
+python -m training.dataset_builder        # URFD -> 학습 배열
+python -m training.train                  # 1D CNN 학습 -> app/ai_classifier/weights/
+python -m training.retrain_from_runs      # 현장 클립으로 액티브 러닝 재학습
+```
 
-- `app/eval/`
-  이벤트 단위 replay 평가, 결과 비교(채택 규칙), 평가셋 manifest 검증, 합성 시나리오
-- `training/`
-  URFD/클립 키포인트 추출, 1D CNN 학습, 액티브 러닝 재학습
-- `scripts/jetson/`
-  TensorRT 변환, 모델 벤치마크, IP 보고 데몬
+데이터 원본, 학습 배열, 가중치, TensorRT 엔진은 저장소에 포함하지 않습니다.
 
 ## 저장소 구조
 
 ```text
 .
-├── app/                        # Jetson 런타임 (uvicorn app.main:app)
-│   ├── main.py                 # FastAPI 엔트리포인트, API 라우트
-│   ├── controller.py           # 메인 처리 루프, 모드 전환, 레코딩/리플레이
-│   ├── config.py               # 환경변수 기반 설정 (환경변수는 여기서만 읽음)
-│   ├── core/                   # 판단 로직 (표준 라이브러리만): 낙상 엔진, 재실, 사건 버퍼, sidecar
-│   ├── ai_classifier/          # 2차 검증 1D CNN: 모델, 추론(fail-open), 특징, 가중치 경로
-│   │   └── weights/            # (git 제외) 학습된 가중치
-│   ├── engine/                 # YOLO Pose 추론 파이프라인, 키포인트 스무딩
-│   ├── media/                  # 카메라, 클립 녹화, 리플레이, JPEG (cv2/ffmpeg)
-│   ├── modes/                  # QR 페어링 모드, Live 감시 모드
-│   ├── api/                    # 백엔드/RPI REST 클라이언트, WebSocket 스트리머
-│   ├── state/                  # 장치 등록/토큰 상태
-│   └── eval/                   # 오프라인 평가 도구 (replay 평가, 비교, manifest 검증, 합성 시나리오)
-├── training/                   # 오프라인 학습/데이터 준비 (GPU 학습 머신)
-├── scripts/jetson/             # 장치용 수동 도구 (TensorRT 변환, 벤치마크, IP 보고)
-├── eval/                       # 버전 관리되는 평가 입력 (합성 baseline, 라벨/manifest 예시)
-├── tests/                      # 회귀 테스트 (unittest, golden trace 포함)
-├── docs/                       # 상세 기술 문서
-├── Dockerfile, docker-compose.yml, .env.example
-├── requirements.txt            # 런타임 의존성
-├── requirements-dev.txt        # 테스트용
-└── requirements-train.txt      # 학습용
+├── app/                    # Jetson 런타임 (uvicorn app.main:app)
+│   ├── main.py             #   FastAPI 엔트리포인트
+│   ├── controller.py       #   메인 처리 루프, 모드 전환, 녹화/리플레이
+│   ├── config.py           #   환경변수 설정
+│   ├── core/               #   판단 로직 (표준 라이브러리만): 낙상 엔진, 재실, 사건 버퍼
+│   ├── ai_classifier/      #   1D CNN 모델, 추론(fail-open), 학습/운영 공용 특징
+│   ├── engine/             #   YOLO Pose 추론, 키포인트 스무딩
+│   ├── media/              #   카메라, 클립 녹화, 리플레이, JPEG
+│   ├── modes/              #   QR 페어링 모드, 실시간 감시 모드
+│   ├── api/                #   서버/RPI 통신, WebSocket 스트리머
+│   ├── state/              #   장치 등록·토큰 상태
+│   └── eval/               #   오프라인 평가 도구
+├── training/               # 학습·데이터 준비 (GPU 학습 머신)
+├── scripts/jetson/         # TensorRT 변환, 벤치마크, IP 보고
+├── eval/                   # 평가 baseline, 라벨/manifest 예시
+├── tests/                  # 회귀 테스트
+└── docs/                   # 상세 문서
 ```
 
-### 테스트 실행
+## 설계 포인트
 
-```bash
-# 룰 엔진/AI 게이트 테스트는 표준 라이브러리만으로 동작 (numpy/torch 테스트는 자동 skip)
-python -m unittest discover -s tests -t . -v
+- **하이브리드 판단**: 빠르고 설명 가능한 규칙 엔진 + 오탐을 줄이는 딥러닝 검증
+- **안전 우선 AI 연동**: 가중치 누락·추론 오류·이상값이면 알람 유지(fail-open), 억제된 사건도 계속 감시 후 승격
+- **측정 기반 개발**: 이벤트 단위 오프라인 평가와 채택 게이트, 합성 시나리오 회귀 테스트
+- **현장 데이터 루프**: 사건마다 판정 근거(키포인트 구간, AI 입력, 파라미터)를 sidecar로 저장해 재학습에 활용
+- **운영 고려**: QR 페어링, 토큰 자동 갱신, 사고 영상 업로드, 스트리밍, Docker 배포
 
-# 분류기 테스트까지 실행
-pip install -r requirements-dev.txt   # (+ torch)
-pytest tests -q
-```
+## 문서
 
-## 실행 환경
+| 문서 | 내용 |
+| --- | --- |
+| [ARCHITECTURE](docs/ARCHITECTURE.md) | 모듈 구조, 스레드, 데이터 흐름 |
+| [FALL_DETECTION_CORE](docs/FALL_DETECTION_CORE.md) | 낙상 판단 알고리즘, AI 게이트 안전 정책 |
+| [EVALUATION_PROTOCOL](docs/EVALUATION_PROTOCOL.md) | 이벤트 단위 평가 절차, 채택 규칙, 평가셋 관리 |
+| [TUNING_GUIDE](docs/TUNING_GUIDE.md) | 파라미터와 환경변수 튜닝 |
+| [OPERATIONS](docs/OPERATIONS.md) | 실행, API, 저장 파일, 운영 점검 |
+| [ROADMAP](docs/ROADMAP.md) | 1D CNN 고도화 계획과 진행 상황 |
 
-주 대상 환경은 Jetson Orin Nano입니다.
-
-### 가정하는 런타임
-
-- Ubuntu/Linux 기반 Jetson 환경
-- NVIDIA 런타임 사용 가능
-- USB 또는 CSI 카메라 연결
-- PyTorch + CUDA 동작 가능
-
-### 사용 기술
-
-- Python
-- FastAPI
-- OpenCV
-- Ultralytics YOLO Pose
-- PyTorch
-- WebSocket
-- Docker / Docker Compose
-
-### 의존성 참고
-
-- 이 저장소의 Python 패키지 의존성은 `requirements.txt`에 정리되어 있습니다.
-- Jetson용 Docker 이미지는 `dustynv/pytorch` 베이스를 사용하며, PyTorch/CUDA 스택은 베이스 이미지가 제공한다고 가정합니다.
-- QR 인식을 위해 컨테이너에는 `libzbar0` 시스템 라이브러리가 필요합니다.
-
-## 빠른 시작
-
-### 1. Docker Compose 실행
-
-실행 전에 환경 예시 파일을 기준으로 `.env`를 준비하는 것을 권장합니다.
-
-```bash
-cp .env.example .env
-```
-
-로컬 테스트에서 백엔드 서버/Raspberry Pi 없이 실행하려면 `.env`에서 아래 값을 `0`으로 두면 됩니다.
-
-```bash
-ENABLE_BACKEND_STREAM=0
-ENABLE_SERVER_REPORTING=0
-ENABLE_RPI_EVENTS=0
-ENABLE_DEVICE_PAIRING=0
-```
-
-```bash
-docker-compose up -d --build
-```
-
-기본 `docker-compose.yml`은 다음을 전제로 합니다.
-
-- 컨테이너 이름: `jetson-edge`
-- 포트: `8000`
-- 카메라 디바이스: `/dev/video0`
-- `runs/` 디렉터리 호스트-컨테이너 마운트
-- NVIDIA 런타임 사용
-- `.env` 또는 셸 환경변수로 앱 설정 주입 가능
-
-### 2. 로컬 bash에서 직접 서버 실행
-
-Conda 환경 예시:
-
-```bash
-source /c/Users/SSAFY/miniforge3/etc/profile.d/conda.sh
-conda activate ai_env
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-실행 후 상태 확인:
-
-```bash
-curl http://localhost:8000/health
-```
-
-### 2. 서버 상태 확인
-
-```bash
-curl http://localhost:8000/health
-```
-
-정상 동작 시 `processing_mode`, `is_registered`, `replay_running` 등의 상태를 확인할 수 있습니다.
-
-### 3. 스트림 확인
-
-이 프로젝트는 현재 두 개의 MJPEG 스트림 엔드포인트를 제공합니다.
-
-- 오버레이 포함 분석 화면  
-  `GET /api/iot/device/falls/stream_overlay`
-- 오버레이 없는 원본 화면  
-  `GET /api/iot/device/falls/stream`
-
-예시:
-
-```bash
-curl http://localhost:8000/api/iot/device/falls/stream_overlay -o overlay.mjpeg
-curl http://localhost:8000/api/iot/device/falls/stream -o raw.mjpeg
-```
-
-## API 요약
-
-### 상태 조회
-
-- `GET /health`
-  앱 전체 상태
-- `GET /level1/status`
-  낙상 관련 최근 상태와 클립 레코더 상태
-- `GET /pose`
-  가장 최근 Observation 반환
-
-### 스트리밍
-
-- `GET /api/iot/device/falls/stream_overlay`
-- `GET /api/iot/device/falls/stream`
-
-### 레코딩
-
-- `POST /record/start`
-  Observation JSONL 기록 시작
-- `POST /record/stop`
-  Observation JSONL 기록 종료
-
-### 리플레이
-
-- `POST /replay/start?path=<absolute_path>&fps=15.0`
-- `POST /replay/stop`
-
-### 모드 관련
-
-- `POST /mode/live`
-  수동 전환용이 아니라 현재는 자동 모드 동작 안내용
-- `POST /mode/replay`
-  리플레이 진입 안내용
-
-## Observation 데이터 구조
-
-실시간 추론 결과는 내부적으로 Observation이라는 공통 구조로 정리됩니다.
+<details>
+<summary>Observation 데이터 구조 (프레임마다 엔진에 들어가는 입력)</summary>
 
 ```json
 {
@@ -396,18 +275,14 @@ curl http://localhost:8000/api/iot/device/falls/stream -o raw.mjpeg
   "frame_index": 123,
   "source_id": "cam0",
   "target_switched": false,
-  "meta": {
-    "conf_thres": 0.5
-  },
   "tracks": [
     {
       "track_id": 0,
       "has_person": true,
       "bbox": [0.1, 0.2, 0.4, 0.8],
       "conf": 0.91,
-      "keypoints_raw": [],
+      "keypoints_raw": [{"id": 0, "x": 0.25, "y": 0.22, "conf": 0.88}],
       "keypoints_smooth": [],
-      "keypoints": [],
       "quality_score": 0.74,
       "frame_shape": [1080, 1920]
     }
@@ -415,167 +290,10 @@ curl http://localhost:8000/api/iot/device/falls/stream -o raw.mjpeg
 }
 ```
 
-이 구조를 기준으로 낙상 엔진, 리플레이, 기록, 후처리 로직이 연결됩니다.
+</details>
 
-## 자동 모드 전환 흐름
+## 한계
 
-```text
-앱 시작
-  -> DeviceState 확인
-     -> 등록 안 됨: QRMode
-     -> 등록됨: LiveMode
-
-QRMode
-  -> 카메라 프레임 캡처
-  -> QR 검출
-  -> 서버 페어링 성공
-  -> DeviceState 저장
-  -> LiveMode로 자동 전환
-
-LiveMode
-  -> YOLO Pose 추론
-  -> Observation 생성
-  -> EMA 스무딩
-  -> PresenceEngine
-  -> Level1Engine
-  -> AI 재검증
-  -> 이벤트 전송 / 클립 저장 / 스트리밍
-```
-
-## 주요 설정값
-
-설정은 대부분 `app/config.py`에서 환경 변수로 읽습니다.
-
-### 카메라 / 영상
-
-- `CAM_INDEX`
-- `FRAME_W`
-- `FRAME_H`
-- `JPEG_QUALITY`
-- `DEFAULT_CONF`
-
-### 모델 / 연산
-
-- `MODEL_PATH`
-- `DETERMINISTIC`
-- `USE_HALF`
-
-### 장치 / 서버
-
-- `DEVICE_ID`
-- `RPI_SERIAL_NUMBER`, `ESP32_SERIAL_NUMBER`
-- `LOCATION_ID`
-- `SERVER_URL`
-- `WS_SERVER_URL`
-- `RPI_URL`
-
-### 저장 경로
-
-- `RUNS_DIR`
-- `CLIP_DIR`
-
-### 사고 클립
-
-- `CLIP_FPS`
-- `CLIP_PRE_SEC`
-- `CLIP_POST_SEC`
-- `CLIP_RESIZE_WIDTH`
-- `CLIP_RESIZE_HEIGHT`
-
-### 낙상 판단 / 스무딩
-
-- `ABNORMAL_TIMEOUT_S`
-- `KP_EMA_ENABLE`
-- `KP_MIN_CONF`
-- `AI_MODE`, `AI_MODEL_PATH`, `AI_SUPPRESS_PFALL_TH`, `AI_ESCALATE_S`, `AI_ESCALATE_REQUIRES_DROP`
-
-실제 알고리즘 세부 파라미터는 `Level1Params`, `PresenceParams`, 스무딩 모듈 내부에도 정의되어 있습니다.
-
-## 현재 구현된 기능
-
-- 자동 QR/Live 모드 전환
-- 실시간 카메라 추론
-- 단일 대상 선택 및 추적
-- 키포인트 EMA 스무딩
-- 재실 감지 이벤트
-- 낙상 의심/확정 상태 전이
-- AI 기반 2차 오탐 억제
-- 사고 전후 영상 저장
-- 서버 이벤트 전송
-- 토큰 만료 시 자동 갱신
-- WebSocket 프레임 릴레이
-- Observation JSONL 기록 및 리플레이
-
-## 데이터 재학습 워크플로우
-
-현재 저장소에는 `runs/clips/not_fall`에 쌓인 오탐 클립을 2차 분류기 재학습에 반영하기 위한 스크립트가 포함되어 있습니다.
-
-흐름:
-
-1. `runs/clips/not_fall/*.mp4`에서 키포인트 시퀀스 추출
-2. `app/ai_classifier/data/active_learning/X_*.npy`, `y_*.npy` 생성 (`TRAIN_DATA_DIR`로 위치 변경 가능)
-3. 기존 train/val 데이터와 병합하여 active-learning 재학습
-
-실행 예시:
-
-```bash
-pip install -r requirements-train.txt   # + CUDA에 맞는 torch
-python -m training.retrain_from_runs
-```
-
-직접 촬영 데이터는 `dataset/custom/` 아래의 `train/`, `val/`, `eval_fixed/` 구조에 나눠 관리하는 것을 권장합니다.
-
-## 저장소에 없는 항목
-
-공개 저장소를 가볍게 유지하기 위해 아래 항목은 기본적으로 포함하지 않습니다.
-
-- `runs/` 아래의 낙상/비낙상 클립
-- Observation 로그 JSONL
-- 학습 데이터 `.npy`
-- 학습 가중치 `.pth`
-- YOLO/TensorRT 모델 산출물 `.pt`, `.onnx`, `.engine`
-
-필요하면 이 항목들은 별도 저장소, 릴리스 자산, 사내 스토리지, 혹은 로컬 보관본으로 분리하는 편이 적절합니다.
-
-## 이 저장소를 포트폴리오 관점에서 볼 때의 포인트
-
-이 프로젝트는 다음 이유로 단순 모델 추론 코드보다 설명 가치가 있습니다.
-
-- 추론 코드만 있는 것이 아니라 장치 상태와 운영 모드가 분리되어 있음
-- 낙상 감지를 상태 머신으로 설계함
-- 규칙 기반과 딥러닝 기반을 결합한 하이브리드 구조를 가짐
-- 실제 운영을 고려한 클립 저장, 토큰 갱신, 이벤트 전송이 포함됨
-- 액티브 러닝용 `not_fall` 사례 축적 흐름이 있음
-
-즉, "모델을 돌렸다"가 아니라 "엣지 장치에서 운영되는 낙상 감지 시스템을 설계하고 구현했다"는 점이 핵심입니다.
-
-## 함께 보면 좋은 문서
-
-- [docs/README.md](docs/README.md)
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- [docs/FALL_DETECTION_CORE.md](docs/FALL_DETECTION_CORE.md)
-- [docs/OPERATIONS.md](docs/OPERATIONS.md)
-- [docs/TUNING_GUIDE.md](docs/TUNING_GUIDE.md)
-- [docs/ROADMAP.md](docs/ROADMAP.md)
-
-## 한계와 참고 사항
-
-- 현재 구현은 단일 주요 대상 추적에 가깝습니다.
-- 멀티인원 장면에서 완전한 ID 추적 시스템은 아닙니다.
-- 실제 서버 주소, 디바이스 ID, 하위 장치 주소 등은 환경에 맞게 조정해야 합니다.
-- Jetson 실환경 최적화는 카메라, 모델 크기, TensorRT 적용 여부에 따라 달라집니다.
-- 저장소에는 학습 데이터와 가중치, 실행 산출물이 함께 존재할 수 있으므로 공개 전 별도 정리가 필요합니다.
-
-## 다음 정리 권장 사항
-
-이 README 이후 공개 저장소 품질을 더 높이려면 아래 순서가 적절합니다.
-
-1. `.gitignore` 정리
-2. `runs/`, 영상 클립, 대용량 `npy/pth` 파일 정리
-3. `docs/` 문서와 실제 코드 값 동기화
-4. `requirements.txt` 보강
-5. `.env.example` 추가
-
----
-
-이 프로젝트는 Jetson 기반 실시간 비전 시스템, 낙상 감지 알고리즘, 엣지-백엔드 연동, 운영형 애플리케이션 구조를 함께 보여주기 위한 코드베이스입니다.
+- 한 장면에서 가장 확실한 한 사람을 추적합니다. 다인원 ID 추적 시스템은 아닙니다.
+- 카메라 높이와 각도에 따라 임계값 민감도가 달라질 수 있습니다.
+- 현재 1D CNN은 낙상 순간이 아니라 확정 직전의 정지 구간을 봅니다. 개선 계획은 [ROADMAP](docs/ROADMAP.md)에 있습니다.
