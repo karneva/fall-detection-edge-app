@@ -66,6 +66,30 @@
 | PKU-MMD, Kinetics, HMDB51, ActivityNet 등 | 낙상 클래스 불명확하거나 웹/드론 영상 |
 | E-FPDS, Kaggle CCTV 이미지 | 정지 이미지라 시계열 학습 불가 |
 
+## 공개 데이터 받기
+
+가입·신청 없이 받을 수 있는 데이터는 스크립트로 받습니다 (저장소 루트에서 실행, `dataset/`는 git 제외).
+
+```bash
+python -m training.datasets.fetch_public list                  # 대상과 라이선스
+python -m training.datasets.fetch_public download --all        # 이어받기 지원, 공개 체크섬 검증
+python -m training.datasets.fetch_public extract gmdcsa24      # 경로 조작을 막는 안전한 압축 해제
+```
+
+| 이름 | 내용 | 대략 크기 |
+| --- | --- | --- |
+| `omnifall_labels` | OmniFall/WanFall 통합 구간 라벨과 분할 | 수 MB |
+| `gmdcsa24` | GMDCSA24 | 1.1GB |
+| `caucafall` | CAUCAFall | 수 GB |
+| `le2i` | Le2i | 9GB |
+| `mcfd` | MCFD (Wayback 미러) | 3.8GB |
+| `figshare_ursul29` | Fall Dataset 29 Subjects | 2.5GB |
+| `charades` | Charades 480p + 주석 (하드 네거티브 후보) | 16GB |
+| `wanfall_synthetic` | 합성 낙상 (사전학습 전용) | 9.7GB |
+
+받은 파일의 URL, 크기, sha256은 `dataset/_downloads.json`에 남습니다.
+UP-Fall(약 850GB), OOPS(45GB 스트리밍), EDF/OCCU(깊이 전용)는 공개지만 크기나 용도 때문에 넣지 않았습니다.
+
 ## 확보 순서
 
 1. **오늘 신청** (승인에 시간이 걸림): AI-Hub 71641, 71550, 167 / CMDFall 이메일 / ETRI 사용 협약서
