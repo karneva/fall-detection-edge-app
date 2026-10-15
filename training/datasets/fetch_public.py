@@ -74,9 +74,10 @@ SOURCES = {
         "what": "Multiple Cameras Fall Dataset (Montreal), 카메라 8대, 자세 코드 구간 라벨",
         "license": "명시 없음 (기술보고서 인용 요청), 연구용",
         "page": "https://www.iro.umontreal.ca/~labimage/Dataset/",
+        # 원 호스트가 봇 차단(Anubis)으로 막히면 Wayback 미러 사용:
+        # https://web.archive.org/web/20211114165908/http://www.iro.umontreal.ca/~labimage/Dataset/dataset.zip
         "files": [
-            ("dataset.zip", "https://web.archive.org/web/20211114165908/"
-                            "http://www.iro.umontreal.ca/~labimage/Dataset/dataset.zip", None, None),
+            ("dataset.zip", "https://www.iro.umontreal.ca/~labimage/Dataset/dataset.zip", None, None),
             ("technicalReport.pdf", "https://web.archive.org/web/2025/"
                                     "https://www.iro.umontreal.ca/~labimage/Dataset/technicalReport.pdf", None, None),
         ],
@@ -177,12 +178,23 @@ def _safe_target(base: Path, member: str) -> Path:
     return target
 
 
+def _is_mac_metadata(name: str) -> bool:
+    """macOS가 zip에 넣는 메타데이터 (__MACOSX/, AppleDouble ._파일)."""
+    parts = name.replace("\\", "/").split("/")
+    return "__MACOSX" in parts or parts[-1].startswith("._")
+
+
 def safe_extract(archive: Path, dest: Path):
-    """경로 조작(../, 절대경로)과 링크를 거부하며 zip/tar를 풉니다. 중첩 zip은 같은 규칙으로 한 단계 더 풉니다."""
+    """
+    경로 조작(../, 절대경로)과 링크를 거부하며 zip/tar를 풉니다.
+    macOS 메타데이터는 건너뛰고, 안에 든 zip은 같은 규칙으로 한 번 더 풉니다.
+    """
     dest.mkdir(parents=True, exist_ok=True)
     if zipfile.is_zipfile(archive):
         with zipfile.ZipFile(archive) as z:
             for info in z.infolist():
+                if _is_mac_metadata(info.filename):
+                    continue
                 target = _safe_target(dest, info.filename)
                 if info.is_dir():
                     target.mkdir(parents=True, exist_ok=True)
@@ -203,7 +215,12 @@ def safe_extract(archive: Path, dest: Path):
     else:
         raise ValueError(f"not an archive: {archive}")
     for inner in list(dest.rglob("*.zip")):
-        safe_extract(inner, inner.with_suffix(""))
+        if not zipfile.is_zipfile(inner):
+            continue
+        target = inner.with_suffix("")
+        if target.exists() and not target.is_dir():
+            target = inner.parent / (inner.name + "_extracted")
+        safe_extract(inner, target)
         inner.unlink()
 
 

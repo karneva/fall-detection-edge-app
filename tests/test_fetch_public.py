@@ -33,6 +33,22 @@ class SafeExtractTest(unittest.TestCase):
         self.assertEqual((dest / "a/scene/clip/video.avi").read_bytes(), b"v")
         self.assertFalse((dest / "a/scene.zip").exists())
 
+    def test_skips_macos_metadata(self):
+        z = self.dir / "mac.zip"
+        self.make_zip(z, {"Fall/a.mp4": b"v", "__MACOSX/Fall/._a.mp4": b"m", "Fall/._b.mp4": b"m"})
+        dest = self.dir / "out"
+        safe_extract(z, dest)
+        self.assertEqual((dest / "Fall/a.mp4").read_bytes(), b"v")
+        self.assertFalse((dest / "__MACOSX").exists())
+        self.assertFalse((dest / "Fall/._b.mp4").exists())
+
+    def test_non_zip_named_zip_is_left_alone(self):
+        z = self.dir / "outer.zip"
+        self.make_zip(z, {"notes.zip": b"plain text", "notes": b"same stem file"})
+        dest = self.dir / "out"
+        safe_extract(z, dest)
+        self.assertEqual((dest / "notes.zip").read_bytes(), b"plain text")
+
     def test_rejects_path_traversal(self):
         bad = self.dir / "bad.zip"
         self.make_zip(bad, {"../escape.txt": b"x"})
