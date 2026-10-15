@@ -66,7 +66,7 @@ class Level1Params:
     # 회복(Recovery) 판단 관련
     recover_s: float = 2.0
     aspect_recover_ratio: float = 0.9
-    recover_center_move_th: float = 0.10
+    recover_center_move_th: float = 0.10   # 미사용 (파라미터 스키마 호환용으로 유지)
 
     # 정지 상태(Stillness) 판단 관련
     still_center_th: float = 0.010
@@ -76,13 +76,13 @@ class Level1Params:
     # 부분 신체 감지(Partial Body) 관련
     partial_min_y2: float = 0.95
     partial_conf_th: float = 0.3
-    partial_vy_relax: float = 0.6
+    partial_vy_relax: float = 0.6          # 미사용 (파라미터 스키마 호환용으로 유지)
 
     # 강제 이상행동 전환 임계치
     force_abnormal_aspect_th: float = 0.7
     force_abnormal_frames: int = 45
 
-    # 고스트(노이즈) 타임아웃
+    # 고스트(노이즈) 타임아웃: 현재 엔진에서 미사용 (sidecar/평가 결과의 파라미터 스키마 호환용으로 유지)
     ghost_timeout_s: float = ABNORMAL_TIMEOUT_S
     screen_edge_margin: float = 0.05
 
@@ -184,20 +184,12 @@ class Level1Engine:
         self.low_posture_cnt = 0
         self.low_posture_start_ts: Optional[float] = None
 
-        self.ghost_start_ts: Optional[float] = None
-        self.is_ghost_mode: bool = False
-        self.last_known_bbox: Optional[List[float]] = None
-        self.ghost_entry_cnt = 0
-        self.ghost_exit_cnt = 0
-        self.lost_start_ts: Optional[float] = None
-
         self.prev_shoulder_y: Optional[float] = None
         self.prev_shoulder_ts: Optional[float] = None
 
         self.baseline_at_enter: Optional[float] = None
 
         self.last_drop_ts: Optional[float] = None
-        self.last_drop_vy: Optional[float] = None
 
         self.present_streak: int = 0
 
@@ -220,7 +212,6 @@ class Level1Engine:
 
         self.height_hist = deque()   # (ts, h)
         self.height_acc_s: float = 0.0
-        self.baseline_h_at_enter: Optional[float] = None
 
         # AI 검증용 키포인트 시퀀스 버퍼 (최근 30프레임)
         self.kp_seq = deque(maxlen=30)
@@ -259,20 +250,12 @@ class Level1Engine:
         self.low_posture_cnt = 0
         self.low_posture_start_ts = None
 
-        self.ghost_start_ts = None
-        self.is_ghost_mode = False
-        self.last_known_bbox = None
-        self.ghost_entry_cnt = 0
-        self.ghost_exit_cnt = 0
-        self.lost_start_ts = None
-
         self.baseline_at_enter = None
 
         self.prev_shoulder_y = None
         self.prev_shoulder_ts = None
 
         self.last_drop_ts = None
-        self.last_drop_vy = None
 
         self.present_streak = 0
 
@@ -289,7 +272,6 @@ class Level1Engine:
 
         self.height_hist.clear()
         self.height_acc_s = 0.0
-        self.baseline_h_at_enter = None
         self.kp_seq.clear()
         self.kp_ts.clear()
         self.kp_buffer.clear()
@@ -491,7 +473,6 @@ class Level1Engine:
 
         t0 = tracks[0]
         bbox = t0.get("bbox")
-        self.last_known_bbox = bbox
 
         aspect = bbox_aspect(bbox)
         cx = bbox_center_x(bbox)
@@ -519,7 +500,6 @@ class Level1Engine:
 
         if vy is not None and vy > self.p.vy_th:
             self.last_drop_ts = ts
-            self.last_drop_vy = vy
 
         # AI 검증용 시퀀스 업데이트
         curr_kp_flat = [0.0] * 34
@@ -645,7 +625,6 @@ class Level1Engine:
                 self.posture_acc_s = 0.0
                 self.shoulder_acc_s = 0.0
 
-                self.baseline_h_at_enter = baseline_h
                 height_acc_now = self.height_acc_s
                 self.height_acc_s = 0.0
 
@@ -731,7 +710,7 @@ class Level1Engine:
                 self._fire_level1(ts)
 
                 # 신뢰도 점수 계산
-                conf_score, conf_detail = self._calculate_confidence(abnormal_duration=time_since_abnormal)
+                conf_score, conf_detail = self._calculate_confidence()
 
                 return {
                     "type": "level1",
@@ -762,7 +741,7 @@ class Level1Engine:
                     self._fire_level1(ts)
 
                     # 타임아웃의 경우에도 신뢰도 계산
-                    conf_score, conf_detail = self._calculate_confidence(abnormal_duration=time_since_abnormal)
+                    conf_score, conf_detail = self._calculate_confidence()
 
                     return {
                         "type": "level1",
@@ -797,7 +776,7 @@ class Level1Engine:
                 ):
                     logger.warning(f"[AI ESCALATED] still collapsed {suppressed_for:.1f}s after AI suppression -> LEVEL1")
                     self._fire_level1(ts)
-                    conf_score, conf_detail = self._calculate_confidence(abnormal_duration=time_since_abnormal)
+                    conf_score, conf_detail = self._calculate_confidence()
                     return {
                         "type": "level1",
                         "ts": ts,
@@ -920,8 +899,6 @@ class Level1Engine:
         self.state = "LEVEL1"
         self.level1_ts = ts
         self.cooldown_until_ts = ts + self.p.level1_cooldown_s
-        self.is_ghost_mode = False
-        self.ghost_start_ts = None
 
     def _enter_suppressed_watch(self, ts: float, frame_index: int, logic: str, ai: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -948,7 +925,7 @@ class Level1Engine:
             },
         }
 
-    def _calculate_confidence(self, abnormal_duration: float) -> Tuple[float, Dict[str, float]]:
+    def _calculate_confidence(self) -> Tuple[float, Dict[str, float]]:
         """
         낙상 신뢰도 점수를 계산합니다 (0~100점).
         신호 강도(40%), 정지 시간(40%), 데이터 품질(20%) 가중치 적용.
