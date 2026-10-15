@@ -56,12 +56,12 @@ test_*.xml
 *.engine
 *.trt
 
-# Training / experiment data
+# Training / experiment data (루트 기준으로 고정: 하위 패키지 이름과 충돌하지 않도록)
 app/ai_classifier/data/
 app/ai_classifier/weights/
-dataset/
-data/
-weights/
+/dataset/
+/data/
+/weights/
 
 # Local tooling
 .codex
