@@ -76,16 +76,18 @@ python -m training.datasets.fetch_public download --all        # 이어받기 �
 python -m training.datasets.fetch_public extract gmdcsa24      # 경로 조작을 막는 안전한 압축 해제
 ```
 
-| 이름 | 내용 | 대략 크기 |
-| --- | --- | --- |
-| `omnifall_labels` | OmniFall/WanFall 통합 구간 라벨과 분할 | 수 MB |
-| `gmdcsa24` | GMDCSA24 | 1.1GB |
-| `caucafall` | CAUCAFall | 수 GB |
-| `le2i` | Le2i | 9GB |
-| `mcfd` | MCFD (Wayback 미러) | 3.8GB |
-| `figshare_ursul29` | Fall Dataset 29 Subjects | 2.5GB |
-| `charades` | Charades 480p + 주석 (하드 네거티브 후보) | 16GB |
-| `wanfall_synthetic` | 합성 낙상 (사전학습 전용) | 9.7GB |
+| 이름 | 내용 | 원본 크기 | 확인된 구성 (2026-10-15) |
+| --- | --- | --- | --- |
+| `omnifall_labels` | OmniFall/WanFall 통합 구간 라벨과 분할 | 10MB | 라벨 CSV, cs/cv 분할 |
+| `gmdcsa24` | GMDCSA24 | 1.1GB | mp4 160개 (피험자 4명), md5 일치 |
+| `caucafall` | CAUCAFall | 8.3GB | avi 100개 (피험자 10명), 프레임 png + 라벨 txt |
+| `le2i` | Le2i | 9.6GB | avi 190개, 주석 txt 131개 (일부 장면은 원래 주석 없음) |
+| `mcfd` | MCFD | 3.8GB | avi 192개 (시나리오 24 x 카메라 8) |
+| `figshare_ursul29` | Fall Dataset 29 Subjects | 2.5GB | mp4 2,018개, md5 일치 |
+| `charades` | Charades 480p + 주석 (하드 네거티브 후보) | 16.3GB | mp4 9,848개 |
+| `wanfall_synthetic` | 합성 낙상 (사전학습 전용) | 9.7GB | mp4 12,000개, HF sha256 일치 |
+
+원본과 압축 해제본을 합치면 약 104GB입니다. 압축 해제 후 `dataset/*/raw/`를 지우면 약 51GB를 줄일 수 있습니다.
 
 받은 파일의 URL, 크기, sha256은 `dataset/_downloads.json`에 남습니다.
 UP-Fall(약 850GB), OOPS(45GB 스트리밍), EDF/OCCU(깊이 전용)는 공개지만 크기나 용도 때문에 넣지 않았습니다.

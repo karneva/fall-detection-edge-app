@@ -78,8 +78,7 @@ SOURCES = {
         # https://web.archive.org/web/20211114165908/http://www.iro.umontreal.ca/~labimage/Dataset/dataset.zip
         "files": [
             ("dataset.zip", "https://www.iro.umontreal.ca/~labimage/Dataset/dataset.zip", None, None),
-            ("technicalReport.pdf", "https://web.archive.org/web/2025/"
-                                    "https://www.iro.umontreal.ca/~labimage/Dataset/technicalReport.pdf", None, None),
+            ("technicalReport.pdf", "https://www.iro.umontreal.ca/~labimage/Dataset/technicalReport.pdf", None, None),
         ],
     },
     "figshare_ursul29": {
