@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.ai_classifier.weights_resolver import (
     DEFAULT_WEIGHT_NAMES,
+    DEFAULT_WEIGHTS_DIR,
     REPO_ROOT,
     resolve_weights_path,
     sha256_8,
@@ -65,6 +66,10 @@ class WeightsResolverTest(unittest.TestCase):
 
     def test_nothing_found(self):
         self.assertIsNone(resolve_weights_path(env={}, search_dir=self.dir))
+
+    def test_default_weights_dir_location(self):
+        # 장치에 배포된 가중치 경로가 바뀌면 분류기가 조용히 꺼지므로 위치를 고정
+        self.assertEqual(DEFAULT_WEIGHTS_DIR, REPO_ROOT / "app" / "ai_classifier" / "weights")
 
     def test_sha256_8(self):
         h = sha256_8(str(self.touch(ACTIVE)))

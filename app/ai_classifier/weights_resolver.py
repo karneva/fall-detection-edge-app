@@ -15,6 +15,8 @@ from typing import Mapping, Optional
 
 PKG_DIR = Path(__file__).resolve().parent
 REPO_ROOT = PKG_DIR.parents[1]
+# 런타임이 찾는 기본 가중치 폴더 (학습 스크립트의 기본 저장 위치와 같음)
+DEFAULT_WEIGHTS_DIR = PKG_DIR / "weights"
 
 DEFAULT_WEIGHT_NAMES = ("fall_model_active_best.pth", "fall_model_best.pth")
 
@@ -41,7 +43,7 @@ def resolve_weights_path(
     if env_path:
         return _resolve_one(env_path)
 
-    base = Path(search_dir) if search_dir is not None else PKG_DIR / "weights"
+    base = Path(search_dir) if search_dir is not None else DEFAULT_WEIGHTS_DIR
     for name in DEFAULT_WEIGHT_NAMES:
         c = base / name
         if c.is_file():

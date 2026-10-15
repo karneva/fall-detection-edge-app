@@ -1,6 +1,8 @@
 import os
 import numpy as np
 from ultralytics import YOLO
+
+from app.ai_classifier.features import normalize_frame_v1 as normalize_keypoints
 from tqdm import tqdm
 import glob
 import random
@@ -14,29 +16,6 @@ MODEL_PATH = "yolov8s-pose.pt"
 SEQ_LEN = 30
 VAL_RATIO = 0.2
 
-def normalize_keypoints(kps):
-    """
-    골반(Hip Center)을 원점으로 하는 상대 좌표계로 변환.
-    kps: (17, 2) [x, y] 정규화 좌표
-    """
-    # 11: Left Hip, 12: Right Hip
-    l_hip = kps[11]
-    r_hip = kps[12]
-    
-    # 두 골반의 신뢰도가 0일 경우(미검출)를 대비해 평균값 계산
-    if np.any(l_hip) and np.any(r_hip):
-        origin = (l_hip + r_hip) / 2
-    elif np.any(l_hip):
-        origin = l_hip
-    elif np.any(r_hip):
-        origin = r_hip
-    else:
-        # 골반이 없으면 중심점(0.5, 0.5) 혹은 Nose(0) 등 차선책 사용
-        origin = kps[0] if np.any(kps[0]) else np.array([0.5, 0.5])
-    
-    # 상대 좌표 변환
-    norm_kps = kps - origin
-    return norm_kps.flatten() # (34,)
 
 def extract_keypoints(model, img_path):
     results = model(img_path, verbose=False)

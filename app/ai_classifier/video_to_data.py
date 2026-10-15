@@ -2,6 +2,8 @@ import os
 import cv2
 import numpy as np
 from ultralytics import YOLO
+
+from app.ai_classifier.features import normalize_frame_v1 as normalize_keypoints
 from tqdm import tqdm
 import glob
 import argparse
@@ -10,22 +12,6 @@ import argparse
 MODEL_PATH = "yolov8s-pose.pt"
 SEQ_LEN = 30
 
-def normalize_keypoints(kps):
-    """골반(Hip Center) 중심 정규화 (dataset_builder.py와 동일 로직)"""
-    l_hip = kps[11]
-    r_hip = kps[12]
-    
-    if np.any(l_hip) and np.any(r_hip):
-        origin = (l_hip + r_hip) / 2
-    elif np.any(l_hip):
-        origin = l_hip
-    elif np.any(r_hip):
-        origin = r_hip
-    else:
-        origin = kps[0] if np.any(kps[0]) else np.array([0.5, 0.5])
-    
-    norm_kps = kps - origin
-    return norm_kps.flatten()
 
 def process_video(model, video_path):
     cap = cv2.VideoCapture(video_path)

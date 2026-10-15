@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
+from app.ai_classifier.features import normalize_sequence_v1
 from app.ai_classifier.weights_resolver import resolve_weights_path, sha256_8
 
 logger = logging.getLogger(__name__)
@@ -66,29 +67,8 @@ class FallClassifier:
         logger.info(f"[AI] Loaded classifier {path} (sha256={self.weights_hash}, threshold={threshold})")
 
     def normalize_sequence(self, sequence):
-        """
-        시퀀스의 각 프레임에 대해 골반 중심 정규화 적용.
-        sequence: Array of (30, 34)
-        """
-        norm_seq = []
-        for frame in sequence:
-            kps = frame.reshape(17, 2)
-            # 11: Left Hip, 12: Right Hip
-            l_hip = kps[11]
-            r_hip = kps[12]
-
-            if np.any(l_hip) and np.any(r_hip):
-                origin = (l_hip + r_hip) / 2
-            elif np.any(l_hip):
-                origin = l_hip
-            elif np.any(r_hip):
-                origin = r_hip
-            else:
-                origin = kps[0] if np.any(kps[0]) else np.array([0.5, 0.5])
-
-            norm_frame = (kps - origin).flatten()
-            norm_seq.append(norm_frame)
-        return np.array(norm_seq, dtype=np.float32)
+        """시퀀스(30, 34)에 v1 골반 중심 정규화를 적용합니다. (학습 코드와 같은 구현 사용)"""
+        return normalize_sequence_v1(sequence)
 
     def predict_proba(self, keypoint_sequence) -> Optional[float]:
         """
