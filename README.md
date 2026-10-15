@@ -212,6 +212,7 @@ AI 실패 시 알람이 유지되는지 확인하는 **fail-open 테스트**가 
 ## 학습 데이터와 재학습
 
 - 공개 데이터셋 **URFD**와 직접 촬영한 낙상/일상 동작 데이터로 1D CNN을 학습했습니다.
+- 추가로 확보할 공개 데이터(Le2i, CAUCAFall, GMDCSA24, AI-Hub 낙상 데이터 등)의 우선순위와 라이선스는 [DATASETS](docs/DATASETS.md)에 정리했습니다.
 - AI가 일상 동작으로 판단한 사건은 `runs/clips/not_fall/`과 `runs/events/`에 쌓여 재학습 재료가 됩니다.
 
 ```bash
@@ -264,6 +265,7 @@ python -m training.retrain_from_runs      # 현장 클립으로 액티브 러닝
 | [TUNING_GUIDE](docs/TUNING_GUIDE.md) | 파라미터와 환경변수 튜닝 |
 | [OPERATIONS](docs/OPERATIONS.md) | 실행, API, 저장 파일, 운영 점검 |
 | [ROADMAP](docs/ROADMAP.md) | 1D CNN 고도화 계획과 진행 상황 |
+| [DATASETS](docs/DATASETS.md) | 추가 학습 데이터 후보, 확보 순서, 라이선스 |
 
 <details>
 <summary>Observation 데이터 구조 (프레임마다 엔진에 들어가는 입력)</summary>
