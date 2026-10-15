@@ -1,7 +1,5 @@
 import os
-import cv2
 import numpy as np
-import torch
 from ultralytics import YOLO
 from tqdm import tqdm
 import glob

@@ -6,21 +6,14 @@ FastAPI 애플리케이션 초기화, 컨트롤러 및 스트리머 시작/종�
 """
 
 import os
-import sys
-import time
 import logging
-import threading
-from typing import Optional, Dict, Any
 
 import torch
 from fastapi import FastAPI, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 from ultralytics import YOLO
 
-from .config import (
-    MODEL_PATH, DETERMINISTIC, 
-    RUNS_DIR, DEVICE_ID, LOCATION_ID
-)
+from .config import MODEL_PATH, DETERMINISTIC
 from .core.controller import AppController
 from .core.streamer import WebSocketStreamer
 

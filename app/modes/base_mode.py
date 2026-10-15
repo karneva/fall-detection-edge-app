@@ -5,7 +5,6 @@ QR 모드와 Live 모드 등 모든 실행 모드가 상속받아야 하는 기�
 
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, Dict, Any
-import cv2
 
 
 class BaseMode(ABC):
@@ -47,16 +46,3 @@ class BaseMode(ABC):
             (관측결과, 시각화데이터, 원본프레임, 추가데이터) 튜플을 반환합니다.
         """
         pass
-    
-    def is_ready(self) -> bool:
-        """현재 모드가 정상적으로 구동 중인지 여부를 반환합니다."""
-        return self.is_running
-    
-    def __enter__(self):
-        """콘텍스트 매니저 진입 시 setup을 호출합니다."""
-        self.setup()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """콘텍스트 매니저 탈출 시 cleanup을 호출합니다."""
-        self.cleanup()

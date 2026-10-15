@@ -5,18 +5,15 @@ import time
 import numpy as np
 import threading
 import collections
-import json
 from datetime import datetime
-from typing import Optional, Deque, Tuple, Any, Dict, List  
+from typing import Optional, Deque, Tuple, Any, Dict
 import subprocess
 from pathlib import Path
 
 from ..config import (
-    FRAME_W, FRAME_H,
     CLIP_DIR, CLIP_FPS, CLIP_PRE_SEC, CLIP_POST_SEC,
-    CLIP_COOLDOWN_S,
     CLIP_RESIZE_WIDTH, CLIP_RESIZE_HEIGHT,
-    ABNORMAL_TIMEOUT_S, JPEG_QUALITY
+    ABNORMAL_TIMEOUT_S,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,7 +131,7 @@ class ClipRecorder:
                 continue
         
         # 모드 코덱 실패 시 기본 설정 사용
-        logger.error(f"[CLIP] 모든 코덱 시도가 실패함. 기본 엔진 사용.")
+        logger.error("[CLIP] 모든 코덱 시도가 실패함. 기본 엔진 사용.")
         writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
         return writer
 
@@ -150,108 +147,6 @@ class ClipRecorder:
                 "buffer_len": len(self.buffer),
                 "meta_buffer_len": len(self.meta_buffer),
             }
-
-    def _dump_jsonl(self, jsonl_path: str, records: List[Dict[str, Any]]) -> None:
-        """분석 데이터(메타데이터)를 JSONL 파일로 저장합니다."""
-        try:
-            with open(jsonl_path, "w", encoding="utf-8") as f:
-                for rec in records:
-                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
-
-    def save_segment(self, incident_ts: float, pre_sec: float, post_sec: float,
-                 filename_prefix: str = "incident", subdir: Optional[str] = None) -> Optional[str]:
-        """
-        특정 사건 발생 시점(incident_ts)을 기준으로 전/후 구간을 동영상으로 저장합니다.
-        
-        Args:
-            incident_ts: 사건 발생 시점 (abnormal_enter 등)
-            pre_sec: 사건 이전 기록 시간(초)
-            post_sec: 사건 이후 기록 시간(초)
-            filename_prefix: 파일명 접두어
-            
-        Returns:
-            저장된 영상의 경로 또는 None
-        """
-        with self.lock:
-            if len(self.buffer) == 0:
-                return None
-
-            # 중복 저장 방지 (3초 쿨다운 적용)
-            now = time.time()
-            if (now - self.last_saved_segment_ts) < self.save_segment_cooldown:
-                logger.warning(f"[CLIP] 중복 저장 시도 무시됨: {now:.2f}")
-                return None
-            
-            self.last_saved_segment_ts = now
-
-            t_start = incident_ts - float(pre_sec)
-            t_end = incident_ts + float(post_sec)
-
-            picked = []
-            for ts, jpg_bytes in list(self.buffer):
-                if t_start <= ts <= t_end:
-                    picked.append((ts, jpg_bytes))
-
-            if not picked:
-                logger.warning(f"[CLIP] 해당 시간 범위에 데이터가 없음: [{t_start:.2f}, {t_end:.2f}]")
-                return None
-
-            # 실제 FPS 추정하여 영상 배속 방지
-            span = max(1e-6, picked[-1][0] - picked[0][0])
-            eff_fps = len(picked) / span
-            eff_fps = max(1.0, min(float(CLIP_FPS), eff_fps))
-
-            clip_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            base_dir = CLIP_DIR
-            if subdir:
-                base_dir = os.path.join(CLIP_DIR, subdir)
-                os.makedirs(base_dir, exist_ok=True)
-                
-            mp4_path = os.path.join(base_dir, f"{filename_prefix}_{clip_id}.mp4")
-            jsonl_path = os.path.join(base_dir, f"{filename_prefix}_{clip_id}.jsonl")
-
-            # 첫 프레임 디코딩 (비디오 라이터 설정용)
-            first_frame = cv2.imdecode(np.frombuffer(picked[0][1], np.uint8), cv2.IMREAD_COLOR)
-            if first_frame is None:
-                return None
-
-            writer = self._open_writer(mp4_path, eff_fps, first_frame.shape)
-            if not writer.isOpened():
-                return None
-
-            writer_w, writer_h = first_frame.shape[1], first_frame.shape[0]
-
-        # 디코딩 및 쓰기 작업 (메인 루프 차단 방지를 위해 락 해제 후 수행)
-        try:
-            for _, jpg_bytes in picked:
-                fr = cv2.imdecode(np.frombuffer(jpg_bytes, np.uint8), cv2.IMREAD_COLOR)
-                if fr is None: continue
-                if fr.shape[1] != writer_w or fr.shape[0] != writer_h:
-                    fr = cv2.resize(fr, (writer_w, writer_h))
-                writer.write(fr)
-        finally:
-            writer.release()
-
-        # 웹 브라우저 재생 호환성을 위한 트랜스코딩
-        mp4_path = self.transcode_mp4_for_web(mp4_path)
-        
-        # 메타데이터도 함께 저장
-        with self.lock:
-            meta_picked = []
-            for mts, m in list(self.meta_buffer):
-                if t_start <= mts <= t_end:
-                    KEEP_KEYS = {"frame_index", "state", "bbox", "aspect", "vy", "drop", "is_still"}
-                    rec = {k: m.get(k) for k in KEEP_KEYS if k in m}
-                    rec["ts"] = float(mts)
-                    meta_picked.append(rec)
-                    
-        if meta_picked:
-            self._dump_jsonl(jsonl_path, meta_picked)
-
-        return mp4_path
 
     def save_range(self, t_start: float, t_end: float, filename_prefix: str = "incident", subdir: Optional[str] = None) -> Optional[str]:
         """지정된 시간 범위 [t_start, t_end]의 영상을 저장합니다."""

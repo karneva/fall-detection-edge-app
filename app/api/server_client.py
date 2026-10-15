@@ -10,7 +10,6 @@ from typing import Optional, Dict, Any, Tuple
 import os
 
 from ..config import (
-    ENABLE_BACKEND_STREAM,
     ENABLE_DEVICE_PAIRING,
     ENABLE_RPI_EVENTS,
     ENABLE_SERVER_REPORTING,
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class ServerClient:
     """
-    HTTP/REST 및 WebSocket을 통한 서버 통신 기능을 제공하는 클래스입니다.
+    HTTP/REST를 통한 서버 통신 기능을 제공하는 클래스입니다. (실시간 영상 WebSocket은 streamer.py)
     """
     
     def __init__(self, server_url: str = None, rpi_url: str = None, timeout: int = 10):
@@ -192,66 +191,3 @@ class ServerClient:
         except Exception as e:
             logger.error(f"Finalization notification failed: {e}")
             return False
-
-    # ===== 데이터 수집 및 상태 확인 =====
-    
-    def ping(self) -> bool:
-        """백엔드 서버와의 연결 상태를 점검합니다."""
-        if not ENABLE_SERVER_REPORTING:
-            return False
-        try:
-            url = f"{self.server_url}/health"
-            resp = requests.get(url, timeout=self.timeout)
-            return resp.status_code == 200
-        except Exception:
-            return False
-
-    # ===== WebSocket 스트리밍 제어 =====
-    
-    def connect_websocket(self, device_id: str) -> bool:
-        """분석 영상을 실시간으로 송출하기 위한 WebSocket 연결을 수립합니다."""
-        if not ENABLE_BACKEND_STREAM:
-            return False
-        import websocket
-        import json
-        
-        self.device_id = device_id
-        try:
-            ws_url = self.server_url.replace("http", "ws") + "/api/ws/stream"
-            self.ws = websocket.WebSocket()
-            self.ws.connect(ws_url, timeout=5)
-            
-            # 장치 활성화 상태 등록 메시지 전송
-            msg = {"type": "REGISTER_DEVICE", "deviceId": device_id}
-            self.ws.send(json.dumps(msg))
-            logger.info(f"WebSocket streaming established for {device_id}")
-            return True
-        except Exception as e:
-            logger.error(f"WebSocket establishment failed: {e}")
-            self.ws = None
-            return False
-
-    def send_stream_frame(self, frame_bytes: bytes):
-        """인코딩된 JPEG 프레임 데이터를 WebSocket을 통해 바이너리로 전송합니다."""
-        # 연결이 끊겼을 경우 재연결 시도
-        if not (hasattr(self, 'ws') and self.ws and self.ws.connected):
-             if hasattr(self, 'device_id') and self.device_id:
-                 if not self.connect_websocket(self.device_id): return
-
-        if hasattr(self, 'ws') and self.ws and self.ws.connected:
-            try:
-                self.ws.send_binary(frame_bytes)
-            except Exception as e:
-                logger.error(f"Streaming frame send error: {e}")
-                try: self.ws.close()
-                except: pass
-                self.ws = None
-    
-    def close_websocket(self):
-        """실시간 영상 스트리밍 연결을 안전하게 종료합니다."""
-        if hasattr(self, 'ws') and self.ws:
-            try:
-                self.ws.close()
-            except: pass
-            self.ws = None
-            logger.info("WebSocket streaming closed")

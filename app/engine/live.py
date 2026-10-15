@@ -53,16 +53,6 @@ def draw_skeleton_norm(frame, keypoints, conf_thr=0.3, edges=COCO17_EDGES,
         if a in pts and b in pts:
             cv2.line(frame, pts[a], pts[b], color, line_thickness)
 
-def keep_top1_person(r):
-    """추론 결과 중 신뢰도가 가장 높은 사람 한 명의 결과만 남깁니다."""
-    if r.boxes is None or len(r.boxes) == 0:
-        return r
-    top = int(torch.argmax(r.boxes.conf).item())
-    r.boxes = r.boxes[top:top + 1]
-    if getattr(r, "keypoints", None) is not None and r.keypoints is not None:
-        r.keypoints = r.keypoints[top:top + 1]
-    return r
-
 def calculate_iou(box1, box2):
     """두 바운딩 박스 간의 IoU(Intersection over Union)를 계산합니다."""
     x1 = max(box1[0], box2[0])

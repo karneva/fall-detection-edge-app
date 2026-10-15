@@ -1,8 +1,7 @@
 import os
 import sys
 import cv2
-import time
-from typing import Optional, Tuple
+from typing import Optional
 import logging
 
 from ..config import CAM_INDEX, FRAME_W, FRAME_H

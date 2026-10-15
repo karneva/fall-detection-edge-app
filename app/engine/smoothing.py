@@ -47,7 +47,6 @@ def _reset_ema_state() -> None:
 
 def _check_person_changed(track_id: Optional[int]) -> bool:
     """트래킹 ID 변화를 감지하여 추적 대상이 교체되었는지 확인합니다."""
-    global _prev_person_id
     if track_id is None:
         return False
     return _prev_person_id is not None and _prev_person_id != track_id

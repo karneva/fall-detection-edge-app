@@ -3,10 +3,8 @@ Live 모드
 사람 감지, 낙상 감시, 이벤트 전송 및 영상 녹화 로직을 통합 관리합니다.
 """
 
-import time
 import logging
 import cv2
-import os
 import dataclasses
 from typing import Optional, Tuple, Dict, Any
 
@@ -15,7 +13,7 @@ from ..engine import LivePipeline
 from ..core import Level1Params, Level1Engine, PresenceParams, PresenceEngine, ClipRecorder
 from ..api.server_client import ServerClient
 from ..state.device_state import get_device_state
-from ..config import JPEG_QUALITY, DEVICE_ID, LOCATION_ID, EVENTS_DIR, SAVE_EVENT_SIDECAR
+from ..config import DEVICE_ID, LOCATION_ID, EVENTS_DIR, SAVE_EVENT_SIDECAR
 from ..core.event_sidecar import write_sidecar
 
 logger = logging.getLogger(__name__)

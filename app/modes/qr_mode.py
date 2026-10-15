@@ -32,7 +32,7 @@ except ImportError:
 from .base_mode import BaseMode
 from ..state.device_state import get_device_state
 from ..api.server_client import ServerClient
-from ..config import FRAME_W, FRAME_H, JPEG_QUALITY, DEVICE_ID
+from ..config import DEVICE_ID
 
 logger = logging.getLogger(__name__)
 
@@ -225,8 +225,3 @@ class QRMode(BaseMode):
             logger.error(f"Registration error: {e}")
         
         return False
-    
-    @property
-    def is_pairing_complete(self) -> bool:
-        """현재 장치가 서버에 페어링되었는지 여부를 확인합니다."""
-        return self.device_state.is_registered()

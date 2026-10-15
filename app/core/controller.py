@@ -2,15 +2,12 @@ import threading
 import time
 import logging
 import cv2
-import sys
 from typing import Optional, Dict, Any, Tuple
 
 from ..utils.camera import CameraManager
-from ..api.server_client import ServerClient
 from ..state.device_state import get_device_state
-from ..config import DEVICE_ID, LOCATION_ID, RUNS_DIR, DETERMINISTIC, JPEG_QUALITY
+from ..config import DEVICE_ID, LOCATION_ID, RUNS_DIR, JPEG_QUALITY
 from ..modes.base_mode import BaseMode
-from ..utils import start_replay_thread
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +30,6 @@ class AppController:
         self.model_factory = model_factory
 
         self.camera_manager = CameraManager()
-        self.server_client = ServerClient()
         self.device_state = get_device_state()
 
         self.stop_event = threading.Event()
