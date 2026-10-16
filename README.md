@@ -267,6 +267,8 @@ python -m training.retrain_from_runs      # 현장 클립으로 액티브 러닝
 | [ROADMAP](docs/ROADMAP.md) | 1D CNN 고도화 계획과 진행 상황 |
 | [DATASETS](docs/DATASETS.md) | 추가 학습 데이터 후보, 확보 순서, 라이선스 |
 | [MODEL_STUDY](docs/MODEL_STUDY.md) | 규칙만 → 1D CNN + URFD → 데이터 추가 → 모델 변경 단계별 개선 수치 (5-fold) |
+| [FAILURE_ANALYSIS](docs/FAILURE_ANALYSIS.md) | 규칙 엔진이 놓친 낙상과 오탐의 원인 분석 (누운 사람 포즈 미검출이 약 2/3) |
+| [DATA_CARD](docs/DATA_CARD.md) | 데이터셋별 fps, 길이, 포즈 검출률, 하강 속도, 알려진 라벨 문제 |
 
 <details>
 <summary>Observation 데이터 구조 (프레임마다 엔진에 들어가는 입력)</summary>

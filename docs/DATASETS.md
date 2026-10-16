@@ -125,6 +125,7 @@ manifest 한 줄 = 영상 하나:
 
 추출 결과는 `dataset/_keypoints/v1/<clip_id>.npz` (`training/datasets/clipfmt.py`):
 `ts` (초), `kps` (T,17,3 정규화 x, y, conf), `bbox`, `present`, `frame_wh`, `meta`(fps, 추출 모델, 대상 전환 수 등).
+선택 키 `switched` (T, bool)는 프레임별 대상 전환(런타임 `target_switched`와 같은 정의)이며, 이 키가 생기기 전에 추출한 v1 클립과 sidecar 클립에는 없습니다 (재추출 시 생김, 형식 버전은 1 그대로).
 운영 중 저장된 obs 녹화와 이벤트 sidecar도 같은 형식으로 읽을 수 있습니다 (`from_obs_records`, `from_sidecar`).
 
 manifest v1 구성 (2026-10-16):
@@ -143,7 +144,7 @@ OmniFall 라벨 경로는 모두 로컬 영상 하나에 정확히 대응합니�
 
 키포인트 추출 결과 v1 (2026-10-16, RTX 4050 Laptop, FP32, 약 80분, 실패 0건):
 
-| 데이터셋 | 프레임 | 사람 검출 비율 (중앙값) | 낙상 시작 구간 관절 가시율 | 가시율 30% 미만 낙상 구간 |
+| 데이터셋 | 프레임 | 사람 검출 비율 (중앙값) | 낙상 시작 구간 관절 가시율 (평균) | 가시율 30% 미만 낙상 구간 |
 | --- | --- | --- | --- | --- |
 | le2i | 75,911 | 0.98 | 0.84 | 0 / 130 |
 | caucafall | 19,877 | 0.97 | 0.77 | 0 / 50 |
@@ -153,9 +154,13 @@ OmniFall 라벨 경로는 모두 로컬 영상 하나에 정확히 대응합니�
 | figshare_ursul29 | 113,763 | 1.00 | (구간 라벨 없음) | |
 
 - 낙상 시작 구간 = [fall_start - 1.5초, fall_start + 2.5초], 가시율 = features v2 conf 마스크 평균
-- MCFD는 사람이 화면 밖에 있는 시간이 길어 전체 검출 비율이 낮지만, 낙상 구간에서는 대체로 보임.
+- MCFD는 사람이 화면 밖에 있는 시간이 길어 전체 검출 비율이 낮습니다. 낙상 시작 구간은 대체로 보이지만, 누운 뒤에는
+  낙상 클립의 절반 이상(104/184)에서 검출 비율이 0.5 미만입니다 (Le2i 15/126 등 다른 데이터셋에도 있음, DATA_CARD 2절).
   카메라별 가시율 편차가 커서(4번 0.34, 7번 0.83) 창 생성 때 가시율 기준 필터 적용 (`training/experiments/windows.py`의 MIN_VISIBILITY 0.3)
 GMDCSA24 `Subject_2/Fall/03`은 Fall 폴더에 있지만 OmniFall 라벨(눕기)을 따라 ADL로 분류했습니다.
+
+데이터셋별 fps, 길이, 부위별 관절 가시율, 낙상 vs 하드 ADL 하강 속도, 프레임 비율과 규칙 임계값, 알려진 라벨 문제,
+Le2i subject 확인은 [DATA_CARD.md](DATA_CARD.md)에 있습니다 (`python -m training.datasets.data_card`로 다시 생성).
 
 ## 확보 순서
 
