@@ -154,7 +154,7 @@ OmniFall 라벨 경로는 모두 로컬 영상 하나에 정확히 대응합니�
 
 - 낙상 시작 구간 = [fall_start - 1.5초, fall_start + 2.5초], 가시율 = features v2 conf 마스크 평균
 - MCFD는 사람이 화면 밖에 있는 시간이 길어 전체 검출 비율이 낮지만, 낙상 구간에서는 대체로 보임.
-  카메라별 가시율 편차가 커서(4번 0.34, 7번 0.83) Day 5 창 생성 때 가시율 기준 필터가 필요
+  카메라별 가시율 편차가 커서(4번 0.34, 7번 0.83) 창 생성 때 가시율 기준 필터 적용 (`training/experiments/windows.py`의 MIN_VISIBILITY 0.3)
 GMDCSA24 `Subject_2/Fall/03`은 Fall 폴더에 있지만 OmniFall 라벨(눕기)을 따라 ADL로 분류했습니다.
 
 ## 확보 순서

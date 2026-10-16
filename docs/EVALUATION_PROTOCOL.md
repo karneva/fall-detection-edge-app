@@ -121,7 +121,7 @@ python -m app.eval.replay_eval --synthetic
   - 저자세 지속(`enter_reason=low_posture_sustained`)으로 진입했다면 저자세가 시작된 시각(`event_anchor_ts`)부터
 - AI가 판정할 때 실제로 본 30프레임(승격 이벤트에서도 억제 당시 입력), `p_fall`, 가중치 해시
 - 엔진 파라미터, 실측 FPS, 클립 경로
-- `review.human_label`: 검수 전 `pending` (Day 8 검수 큐에서 사용)
+- `review.human_label`: 검수 전 `pending` (Day 9 검수 큐에서 사용)
 
 AI가 억제한 사건(`not_fall` 클립)도 검수 전에는 ADL로 단정하지 않습니다.
 

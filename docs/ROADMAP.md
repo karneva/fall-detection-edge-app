@@ -3,6 +3,7 @@
 ## 목표
 
 실제 낙상은 놓치지 않고(높은 recall), 침대에 눕기·빨리 앉기·물건 줍기 같은 하드 ADL 오탐은 줄이는 것.
+분류기만이 아니라 앞단의 비전 모델(포즈 검출)까지 실패 원인을 따라가 고치고, 모든 변경을 같은 평가표로 비교합니다.
 
 ## 현재 정확도를 막고 있는 원인
 
@@ -25,16 +26,23 @@
    - 억제 후 쿨다운과 리셋 때문에 누운 사람이 다시 알람을 받지 못했습니다.
 5. 액티브 러닝 자기강화 루프
    AI가 억제한 클립을 검수 없이 전부 ADL로 학습합니다. AI가 놓친 실제 낙상도 ADL로 강화됩니다.
-6. 평가 체계 부재
+6. 평가 체계 부재 (Day 2, progression_v1에서 해결)
    소규모 URFD val 정확도로 모델을 고르고, 이벤트 단위 recall이나 시간당 오탐을 재는 도구가 없습니다.
+7. 규칙 상한 (progression_v1에서 확인)
+   AI는 거부권만 있어 recall이 규칙만의 값(공개 데이터 0.608)을 넘을 수 없습니다. 놓친 낙상 185/472개 중
+   137개는 ABNORMAL에 아예 들어가지 않았고 48개는 들어갔다가 LEVEL1까지 가지 못했습니다.
+   들어가지 못한 이유가 포즈 검출 실패인지 규칙 조건인지는 아직 나누어 세지 않았습니다 (Day 5).
 
 ## 채택 규칙
 
 Day 2 이후 모든 변경은 `replay_eval` 결과로 채택 여부를 정합니다.
 
 - 낙상 이벤트 recall이 떨어지지 않을 것
-- 하드 ADL의 시간당 오탐(FA/h)이 줄어들 것
+- ADL 오탐이 줄어들 것 (공개 데이터 `run_progression`은 ADL 클립 오탐률, 현장 녹화셋 `replay_eval`은 하드 ADL 시간당 오탐 FA/h.
+  공개 데이터의 ADL은 합쳐서 수십 분이라 FA/h를 내지 않음)
 - 창 단위 accuracy는 진단용으로만 사용
+- 공개 데이터 기준은 `run_progression`의 5-fold 결과. 새 방법은 단계로 추가하고, fold별 paired 차이로 판단
+  (차이가 fold 잡음 안이면 "구분 불가"로 기록)
 
 ## 일정
 
@@ -105,7 +113,7 @@ CNN이 실제 낙상 알람을 조용히 지우는 경로를 막았습니다. �
 
 ### 단계별 개선 실험 (progression_v1) ✅
 
-Day 5~6 항목 중 분할, 창 생성, 모델(Fall1DCNN-GAP, FallTCN, 고전 ML), 학습 하네스를 먼저 만들어
+원래 Day 5~6 계획에 있던 분할, 창 생성, 모델(Fall1DCNN-GAP, FallTCN, 고전 ML), 학습 하네스를 먼저 만들어
 "규칙만 → 1D CNN + URFD(원래 방식) → 데이터 추가 → 라벨/학습-운영 정렬 → 사건 구간 v2 + 모델 변경 → 임계값 조정"을
 같은 5-fold, 같은 이벤트 단위 프로토콜로 측정했습니다. 결과와 주의점은 [MODEL_STUDY.md](MODEL_STUDY.md).
 
@@ -113,49 +121,155 @@ Day 5~6 항목 중 분할, 창 생성, 모델(Fall1DCNN-GAP, FallTCN, 고전 ML)
 - 사건 구간 v2(E)는 ADL 오탐을 0.174 → 0.05~0.065로 줄이는 대신 recall이 감소, balanced 차이는 fold 잡음 안
 - 다음 개선 후보: LEVEL1 시점의 최신 창(또는 진입 이후 최대 p_fall)으로 판정, onset 오프셋을 fold별로 추정,
   시간 기준 탐지 지표를 실행기에 추가, 규칙 엔진 recall 상한(0.608) 개선
+- 원래 Day 5~6 계획 중 분할(`folds.py`), 창 생성(`windows.py`), 고전 ML 비교군, Fall1DCNN-GAP/FallTCN, 학습기,
+  증강(좌우 반전, 시간 늘이기, 관절 dropout)은 여기서 끝났습니다. GRU-64와 프레임 보조 head는 보류합니다
+  (분류기 사이 차이가 fold 잡음 안이라, 구조를 더 바꾸기보다 실패 원인을 먼저 세는 쪽이 우선).
 
-### Day 5: 라벨, 창, 분할과 데이터 분석 (CPU)
+## 이후 일정: 문제 정의 -> 원인별 해결 -> 같은 평가표로 비교 -> 엣지 최적화
 
-- `training/windows.py`: 낙상 onset 기준 양성 창, ADL/onset 이전 음성 창, 룰 트리거 창 하드 네거티브 태깅
-- `training/splits.py`: StratifiedGroupKFold(5, event_group), fold 배정 저장과 누수 테스트
-- Data card / EDA: fps 분포, 관절 결측률, 낙상 vs 하드 ADL 하강 속도 분포
-- 고전 ML 비교군: 손으로 만든 시계열 특징 + LogReg/GBDT, 특징 중요도
-- Day 4 리뷰에서 넘어온 주의점: Figshare 클립은 약 1.9초라 4초 창에 못 미침(짧은 창 또는 제외 결정 필요),
-  추출기는 운영의 품질 게이트(quality < 0.15, 대상 전환 후 1초 유예)를 적용하지 않음(Day 7 런타임 정렬 때 맞춤),
-  Le2i subject 값은 OmniFall 그대로라 교차 피험자 분할 전 확인 필요,
-  MCFD 낙상 구간 26/184개는 관절 가시율 30% 미만(특히 4번 카메라)이라 가시율 기준 필터 필요
+progression_v1로 알게 된 것:
 
-### Day 6: 모델 zoo와 학습 하네스
+- 분류기 변경(C~E)의 차이는 fold 잡음 안이고, recall은 규칙 상한 0.608에 막혀 있습니다.
+- 놓친 낙상 185개 중 137개는 ABNORMAL에 들어가지도 못했습니다. 남은 개선 여지는 분류기 구조보다 앞단
+  (포즈 검출 또는 규칙 판정)에 있다고 보고, Day 5의 실패 분석으로 어느 쪽인지 먼저 확인합니다.
 
-- `app/ai_classifier/models/`: `Fall1DCNN`(v1 유지), `Fall1DCNN-GAP`(81k), `FallTCN-40`(43k, dilation 1/2/4/8,
-  수용영역 61스텝, attention pooling, 프레임 보조 head), `GRU-64`
-- `training/augment.py`: 속도/fps 교란, 앵커 jitter, 좌우 flip(관절 swap), 스케일/종횡비, 관절 dropout
-- `training/train_cv.py`: fold x seed, 이벤트 가중 CE, OOF 기반 선택, `runs/train/<id>/` 기록
-- [owner, GPU] ablation R0~R8 실행 (분할 수정 -> 라벨/창 -> 특징 -> 헤드 -> TCN -> 보조 head)
+새 방법은 모두 `run_progression`에 단계로 추가해 같은 5-fold, 같은 이벤트 단위 지표로 비교합니다.
+앞단(포즈 모델, 규칙)이 바뀌면 그 뒤의 분류기와 이상 탐지는 새 입력으로 다시 학습해서 비교합니다.
 
-### Day 7: 보정과 런타임 정렬
+| 단계 | 내용 | Day |
+| --- | --- | --- |
+| E* | 사건 구간 분류기를 ABNORMAL 진입 이후 창들의 최대 p_fall로 판정 (재학습 없음) | 5 |
+| G | 정상 행동만으로 학습한 포즈 시퀀스 이상 탐지 (오토인코더, STG-NF), 지도학습과 결합 | 6 |
+| P 또는 R | Day 5 결과에 따라 포즈 모델 개선(P) 또는 규칙/트리거 개선(R) 후 A 재측정, C/E/G 재학습 후 재측정 | 7 |
+| T | TensorRT FP16/INT8 포즈 모델로 다시 추출해 같은 측정 (최적화로 잃는 정확도) | 8 |
+| S | (선택) 장면 분할로 바닥에 누운 경우만 낙상 후보 | 9 |
 
-- `training/calibrate.py`: temperature scaling, OOF recall 제약 억제 임계값, reliability diagram -> `meta.json`
-- v2 모델은 ABNORMAL 진입 사건 구간을 분류 (v1 경로와 공존, shadow로 먼저 운영)
-- `KnownIssuesTest` 2건 해소 (CNN 창이 낙상 onset 미포함, LEVEL1 이후 enter/exit 반복), `replay_eval`에 v2 모드 추가
+기존 문서에서 Day 7(런타임 정렬)이라고 쓴 항목은 Day 8로, Day 8(검수 큐)은 Day 9로 옮겼습니다.
+
+### Day 5: 실패 원인 분석과 데이터 카드 (CPU)
+
+- `training/experiments/failure_analysis.py`: progression_v1 A 단계의 놓친 낙상 185개와 ADL 오탐 77개를 원인별로 셈
+  - 포즈 검출: 낙상 구간 동안 사람 검출 비율(present), 관절 평균 신뢰도, bbox 급변(대상 전환 추정. 클립 파일에는
+    프레임별 전환 여부가 없고 추출 요약의 `n_switch`는 클립 전체 합계뿐)
+  - 규칙 판정: ABNORMAL 미진입 / 진입했지만 10초 유지 전에 해제(일어남, 가림) / 마지막 프레임 상태 때문에 미확정
+    (사람 미검출·품질 미달이면 정지 누적이 멈춤. 재생은 마지막 프레임을 20초 반복하므로 영상 길이 자체는 원인이 아님)
+  - 제때 아닌 탐지: MODEL_STUDY 엄격 기준(ABNORMAL 진입이 [fall_start - 2초, fall_end + 3초] 밖이거나
+    LEVEL1이 fall_start 이전)에 걸린 A의 45개를 포즈·규칙 원인별로 나눔
+  - ADL 오탐: OmniFall 구간 클래스(lie_down/lying, sit_down/sitting, other 등)로 1차 분류하고, 77개를 직접 보며
+    눕는 곳(바닥/침대/소파/의자)과 동작을 태깅 (클래스에 장소 정보가 없고, URFD ADL은 구간 라벨이 없음)
+  - 신뢰도가 높아도 골격이 틀린 경우는 위 지표에 잡히지 않으므로, 놓친 낙상 중 무작위 30개는 키포인트를 영상에
+    겹쳐 직접 보고 원인을 기록해 자동 분류와 대조
+  - 데이터셋, 카메라, 관절 가시율별 분포와 대표 사례 그림
+- 시간 기준 탐지 지표를 실행기에 정식으로 추가: `replay.clip_outcome`에 첫 LEVEL1 에피소드의 ABNORMAL 진입 시각과
+  낙상 구간을 남기고 `replay.summarize`에서 제때 recall(엄격/느슨)을 집계 (기존 결과는 다시 재생)
+- 단계 E*: ABNORMAL 진입부터 LEVEL1까지를 E와 같은 4초 창으로 밀며 판정해 최대 p_fall로 거부 여부를 정함
+  (재학습 없음). LEVEL1 시점의 최신 창은 재생에서 대부분 정지 꼬리(같은 프레임 반복, 낙상 219/287)라
+  E가 학습한 적 없는 입력이므로 참고 행으로만 기록
+- `docs/DATA_CARD.md`: 데이터셋별 fps, 길이, 관절 결측률, 낙상 vs 하드 ADL 하강 속도 분포, 라이선스, 알려진 라벨 문제
+- Day 4 리뷰에서 넘어온 주의점 중 남은 것: 품질 게이트(quality < 0.15)는 재생 엔진과 D/E 창 생성에서 이미 적용되지만,
+  클립 파일에 프레임별 대상 전환 여부가 없어 재생에서 대상 전환 후 1초 유예가 빠져 있음 (추출기에 프레임별 기록 추가).
+  Le2i subject 값은 OmniFall 그대로라 교차 피험자 분할 전 확인 필요
+- 다음 할 일을 정하는 기준은 분석 전에 정해 둠:
+  - 직접 확인으로 보정한 놓친 낙상의 원인 중 포즈 검출이 약 1/3 이상이면 Day 7은 포즈 모델 개선(P)
+  - 규칙 판정이 주원인이면 Day 7은 규칙/트리거 개선(R)
+  - ADL 오탐 중 침대·소파 누움이 많으면 Day 9에 장면 분할(S)
+  - 앞단을 먼저 바꾸면 Day 6 결과를 다시 재야 하므로, Day 7을 Day 6보다 먼저 할지도 함께 정함
+
+### Day 6: 포즈 시퀀스 이상 탐지 (논문 구현)
+
+낙상은 정상 행동보다 드물고 라벨 비용이 큽니다. 정상 행동만으로 학습해 벗어나는 정도를 점수로 쓰는 방식을
+지도학습(C~E)과 같은 표에서 비교합니다.
+
+- `training/anomaly/`: ADL 클립과 낙상 클립의 낙상 이전 구간만으로 학습 (fold의 학습 부분만 사용)
+  - 기준선: 사건 구간 v2 입력의 1D conv 오토인코더 재구성 오차, 손설계 특징의 Mahalanobis 거리
+  - STG-NF (Hirschorn & Avidan, ICCV 2023): 포즈 시퀀스를 시공간 그래프로 보고 normalizing flow로 정상 likelihood를
+    학습. likelihood가 낮을수록 이상
+- 이상 점수를 검증 ADL 분위수로 p_fall처럼 바꿔 기존 verifier 자리에 주입 (단계 G), 지도 + 이상 점수 결합 (G+E)
+- 라벨 효율 곡선: 학습 낙상 라벨을 10/25/50/100%로 줄였을 때 지도학습 vs 이상 탐지
+- 원 논문 설정과 다른 점(COCO 17관절, 15Hz, 4초 창, 데이터셋)과 재현 수준을 `MODEL_STUDY.md`에 기록
+
+### Day 7: 앞단 개선 (Day 5 결과에 따라 P 또는 R)
+
+하루를 넘으면 7a(모델/규칙 개선과 단독 평가)와 7b(재추출, 재측정)로 나눕니다.
+
+**P: 포즈 모델 개선 (의사 라벨, 파인튜닝)** — 가설: 기본 YOLOv8-pose는 누운 사람, 내려다보는 시점, 어두운 장면에 약함
+
+- 평가셋: 평가 데이터셋의 서로 다른 클립(클립당 1~2장)에서 낙상·누운 자세 위주로 100장부터 시작해 약 200장까지
+  직접 라벨링 (CVAT, 사람 박스 + skeleton, COCO keypoints 형식)
+  - 기본/파인튜닝 모델은 같은 평가기(ultralytics val로 고정)로 OKS AP를 재고 이미지 단위 bootstrap 신뢰구간을 함께 기록
+  - 이 평가셋은 체크포인트·의사 라벨 임계값 선택에 쓰지 않음 (선택은 학습 영상에서 떼어 낸 검증 프레임으로)
+- 학습 데이터: 평가에 쓰지 않는 영상에서만 프레임 추출 (Figshare, WanFall 합성, Charades 눕기·앉기 구간)
+- 의사 라벨: yolov8x-pose 교사 + 회전 TTA (0/90/180/270도로 돌려 넣고 결과를 역회전, 신뢰도 높은 쪽 선택).
+  누운 사람을 돌리면 선 자세가 되어 검출이 쉬워지는 점을 이용. 신뢰도 기준으로 거르고 일부는 직접 확인
+- `training/pose/`: 프레임 추출, 의사 라벨, ultralytics 학습 설정
+- 운영 모델과 같은 yolov8s-pose를 파인튜닝: 저조도, 블러, 가림, 회전 증강. 기본 yolov8s-pose와 OKS AP 비교
+  (전체 / 누운 자세). 모델 크기 효과는 섞지 않고 Day 8 최적화 표에서 따로 비교
+- 단계 P: 개선 모델로 manifest 전체(평가 데이터셋 + Figshare, 약 80분) 키포인트를 `dataset/_keypoints/v2`에 다시 추출
+  - A(규칙만)를 먼저 재측정해 규칙 상한이 오르는지 확인하고, E0(5-fold 합계 약 7분)를 다음으로 측정
+  - C/E/G는 규칙 상한이 오를 때 같은 `folds_v1`로 새 키포인트에서 재학습 (옛 키포인트로 학습한 모델을 새 키포인트로
+    평가하지 않음. C만 5-fold 합계 약 2.5시간). Figshare가 포즈 학습에도 쓰였다는 점을 결과에 함께 적음
+- [owner, GPU] 파인튜닝과 재추출 (RTX 4050 6GB 기준 batch, imgsz 조정)
+
+**R: 규칙/트리거 개선** — Day 5에서 규칙 판정이 주원인으로 나오면
+
+- ABNORMAL 진입 조건(급하강, 자세 변화 기준), 정지 유지 시간, lost·품질 미달 프레임 처리 중 원인에 해당하는 것만 변경
+- golden trace가 바뀌는 의도된 변경이므로 이유를 남기고 재생성, 합성 시나리오 안전 테스트는 그대로 통과해야 함
+- A 재측정 후 C/E/G를 같은 `folds_v1`로 재측정 (D/E 학습 창이 규칙 재생에 의존하므로 재학습)
+
+### Day 8: 런타임 정렬과 엣지 최적화 (Jetson)
+
+하루를 넘으면 8a(런타임 정렬)와 8b(엣지 최적화)로 나눕니다.
+
+8a. 런타임 정렬
+
+- v2 사건 구간 분류기를 런타임에 연결 (v1 경로와 공존, shadow로 먼저 운영), `replay_eval`에 v2 모드 추가,
+  `KnownIssuesTest` 2건 해소 (CNN 창이 낙상 onset 미포함, LEVEL1 이후 enter/exit 반복)
+- 임계값은 운영 기본값 0.4 유지 (progression F에서 검증셋으로 고른 값이 test로 옮겨가지 않음).
+  `meta.json`에 임계값과 근거(run_progression 결과 경로)를 기록. veto 경계는 `p_fall <= th`를 `p < th`로 바꾸고
+  th <= 0이면 veto를 끄는 쪽으로 정리
+- `training/export_onnx.py`: 분류기 ONNX 변환과 PyTorch-ORT parity 테스트
 - 타깃 연속성: 후보가 1명이면 switch 판정 금지, ABNORMAL/억제 감시 중 스위치 리셋 금지, lost 중 승격 평가
 
-### Day 8: 강건성, 배포 증거, 피드백 루프
+8b. 포즈 모델 최적화 표
 
-- 강건성: fps 10/20Hz, 관절 dropout, EMA vs 원시 입력, 카메라 시점
-- `training/export_onnx.py`와 PyTorch-ORT parity 테스트, Jetson 지연(ORT CPU / TensorRT FP16)
+- 기준은 현재 운영인 yolov8s-pose PyTorch FP32 (Day 7 개선 모델이 있으면 그 모델도 같은 형식으로).
+  비교 대상은 TensorRT FP16 / INT8 (INT8 보정 이미지는 학습 분포에서 추출)과 yolov8n-pose (크기 효과)
+- 변환과 지연·FPS: 기존 `scripts/jetson/export_tensorrt.py --model`, `benchmark_models.py`(`PT_MODEL_PATH`,
+  `ENGINE_MODEL_PATH`) 사용. 두 스크립트 기본값이 yolov8n-pose라 운영 모델을 명시해야 함
+- OKS AP는 Day 7 평가셋, 단계 T의 recall/오탐은 노트북 TensorRT 엔진으로 평가 영상을 다시 추출해서 측정 [owner, GPU]
+- [owner, Jetson] 지연과 처리 FPS 측정
+
+### Day 9: 일반화, 장면 맥락(선택), 포트폴리오 정리
+
+- 데이터셋 단위 일반화: leave-one-dataset-out (예: Le2i를 빼고 학습 -> Le2i 테스트)
+- (선택, Day 5에서 침대·소파 누움 오탐이 많으면) 장면 분할: 사전학습 분할 모델로 바닥/침대/소파 영역을 나누고,
+  바닥에 누운 경우만 낙상 후보로 보는 단계 S
 - 클립 검수 큐, `retrain_from_runs`의 무검수 라벨 0 제거 (승격된 실제 낙상도 `not_fall`에 저장되기 때문)
-- [owner, GPU/Jetson] 실험 실행과 지연 측정
+- [owner] 배포 카메라 녹화와 라벨링 (Day 2 미완료 항목): 정지 꼬리 가정과 하드 ADL 시간당 오탐(FA/h)을 실제 설치
+  환경에서 다시 측정
+- `MODEL_STUDY.md` 갱신 (E*, G, P/R, T, S 단계, 지연 표, 라벨 효율 곡선), README에 문제 정의 -> 해결 -> 수치 흐름 요약
 
-### Day 9: 일반화와 포트폴리오 정리
+### 협업 방식 (Day 5부터 병행)
 
-- Le2i 어댑터와 cross-dataset 평가 (URFD+커스텀 학습 -> Le2i 테스트)
-- `docs/MODEL_STUDY.md`(진단, ablation 표, 신뢰구간, attention 그림), `DATA_CARD.md`, `RESEARCH_SKELETON_MODELS.md`
-  (TCN, InceptionTime, MiniRocket, ST-GCN, Transformer 비교와 채택 근거)
-- (선택) 사전학습 ST-GCN++ 전이 학습 기술 검증
+- 기능 단위 브랜치와 PR. PR 설명에 변경 이유, 실험 수치, 검증 방법을 쓰고 리뷰 코멘트와 반영 내용을 남김
+- `.github/workflows/tests.yml`: 의존성 없는 테스트와 numpy/torch 테스트를 GitHub Actions에서 실행
+- [owner] push와 PR 생성
+
+### 보류
+
+- GRU-64, 프레임 보조 head, InceptionTime/MiniRocket 비교, `RESEARCH_SKELETON_MODELS.md`: 분류기 차이가 fold 잡음
+  안이라 우선순위를 낮춤 (모델 비교는 `MODEL_STUDY.md`에 모음)
+- 사전학습 ST-GCN++ 전이 학습: Day 6의 그래프 기반 모델(STG-NF) 결과를 보고 결정
+- temperature scaling과 reliability diagram: 단조 변환이라 판정은 바뀌지 않음. p_fall을 화면에 보여 주거나
+  이상 점수와 합칠 때(G+E)만 추가
+- 강건성(fps 10/20Hz, EMA vs 원시 입력, 카메라 시점): Day 8 처리 FPS와 Day 9 leave-one-dataset-out 결과를 보고 결정
+- onset 오프셋 변형: fold별 학습 클립으로 오프셋 추정 (test fold로 잰 1.0초는 쓰지 않음), Day 5 결과를 보고 결정
 
 주의:
 
 - 라벨, 특징, 구조를 한 실험에서 동시에 바꾸지 않습니다.
-- 낙상 이벤트가 약 30개라 1개 차이가 recall 약 17%p입니다. 신뢰구간 안의 차이는 "구분 불가"로 씁니다.
+- 공개 평가 낙상은 472개(test fold당 89~98개)라 전체 recall에서 1개 차이는 약 1%p이지만, 데이터셋별로 보면 크게
+  흔들립니다 (URFD는 fold당 낙상 6개라 1개가 약 17%p). 같은 fold끼리 비교한 paired 차이가 fold 잡음(balanced 표준편차
+  0.03~0.07) 안이거나 fold마다 방향이 다르면 "구분 불가"로 씁니다. 낙상 수가 적은 현장 녹화셋은 신뢰구간을 함께 적습니다.
 - 합성 시나리오 결과는 제어 흐름 회귀 테스트일 뿐, 정확도 지표로 쓰지 않습니다.
+- 포즈 모델 학습과 의사 라벨에는 평가 데이터셋 영상을 쓰지 않습니다 (직접 라벨링한 평가셋 200장만 예외, 학습 제외).
