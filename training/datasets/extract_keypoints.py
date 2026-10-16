@@ -63,18 +63,21 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
 
     - 직전 프레임에서 고른 박스(픽셀)를 last_bbox로 넘겨 IoU 추적 (사람이 없으면 None으로 리셋, 런타임과 같음)
     - 좌표는 해당 프레임 크기로 정규화하고 [0, 1]로 자름 (obs_schema와 같음)
+    - switched (T,): 그 프레임에서 대상이 바뀌었는지 (런타임 obs.target_switched와 같음: 직전 프레임에 대상이 있었고
+      IoU >= iou_thresh인 후보가 없어 최고 신뢰도 후보로 바꾼 경우만 True. 놓친 뒤 다시 잡은 첫 프레임은 False)
+    - n_switch = switched.sum()
     """
     ts: List[float] = []
     kps: List[np.ndarray] = []
     bbox: List[np.ndarray] = []
     present: List[bool] = []
+    switched_l: List[bool] = []
     frame_wh: Optional[List[int]] = None
     last_bbox = None
-    n_switch = 0
     n_multi = 0
 
     def consume(buf: List[np.ndarray]):
-        nonlocal last_bbox, n_switch, n_multi, frame_wh
+        nonlocal last_bbox, n_multi, frame_wh
         dets = predictor(buf)
         if len(dets) != len(buf):
             raise RuntimeError(f"predictor returned {len(dets)} results for {len(buf)} frames")
@@ -86,13 +89,13 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
             if len(boxes) > 1:
                 n_multi += 1
             idx, switched = select_target_index(boxes, confs, last_bbox=last_bbox, iou_thresh=iou_thresh)
+            switched_l.append(bool(switched) and idx is not None)
             if idx is None:
                 last_bbox = None
                 kps.append(np.zeros((NUM_KPS, 3), np.float32))
                 bbox.append(np.zeros(4, np.float32))
                 present.append(False)
                 continue
-            n_switch += int(switched)
             last_bbox = boxes[idx]
             k = np.zeros((NUM_KPS, 3), np.float32)
             k[:, 0] = np.clip(np.asarray(kxy[idx][:, 0], np.float64) / w, 0.0, 1.0)
@@ -113,13 +116,15 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
         consume(buf)
 
     t = len(ts)
+    sw = np.asarray(switched_l, bool)
     return {
         "ts": np.asarray(ts, np.float64),
         "kps": np.stack(kps).astype(np.float32) if t else np.zeros((0, NUM_KPS, 3), np.float32),
         "bbox": np.stack(bbox).astype(np.float32) if t else np.zeros((0, 4), np.float32),
         "present": np.asarray(present, bool),
         "frame_wh": frame_wh or [0, 0],
-        "n_switch": n_switch,
+        "switched": sw,
+        "n_switch": int(sw.sum()),
         "n_multi": n_multi,
     }
 
@@ -205,7 +210,8 @@ def extract_one(row: Dict[str, Any], out_path: Path, predictor: Predictor, open_
     }
     if with_hash:
         meta["video_sha256"] = sha256_file(video)
-    save_clip(out_path, clip["ts"], clip["kps"], clip["bbox"], clip["present"], clip["frame_wh"], meta)
+    save_clip(out_path, clip["ts"], clip["kps"], clip["bbox"], clip["present"], clip["frame_wh"], meta,
+              switched=clip["switched"])
     return {"frames": t, "container_frames": container_frames, "native_fps": fps, "fps_source": fps_source,
             "present_ratio": round(present_ratio, 4), "switches": clip["n_switch"]}
 

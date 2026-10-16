@@ -10,8 +10,13 @@
   bbox      float32 (T,4)      [x1,y1,x2,y2] 정규화, 사람 없음 -> 0
   present   bool    (T,)       해당 프레임에서 대상이 선택되었는지
   frame_wh  int32   (2,)       원본 [width, height] (픽셀)
+  switched  bool    (T,)       (선택) 해당 프레임에서 추적 대상이 바뀌었는지 (런타임 obs.target_switched와 같은 정의).
+                               예전 파일/sidecar 클립에는 없음 -> load_clip 결과에서 키 자체가 빠짐 (clip.get("switched") is None)
   meta      0-d str            JSON (clip_format_version, dataset, clip_id, video, native_fps, n_frames,
                                extractor{model,conf,imgsz,select,ultralytics_version}, video_sha256?, created_at)
+
+switched는 없어도 되는 추가 키라 clip_format_version은 1 그대로 둡니다 (예전 파일도 그대로 읽히고,
+예전 load_clip도 모르는 키를 무시하므로 새 파일을 읽을 수 있음).
 """
 import json
 import os
@@ -23,14 +28,27 @@ import numpy as np
 CLIP_FORMAT_VERSION = 1
 NUM_KPS = 17
 CLIP_KEYS = ("ts", "kps", "bbox", "present", "frame_wh", "meta")
+OPTIONAL_KEYS = ("switched",)
 
 
 def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _as_arrays(ts, kps, bbox, present, frame_wh) -> Dict[str, np.ndarray]:
-    """형식에 맞는 dtype으로 바꾸고 shape를 검사합니다. 어긋나면 ValueError."""
+def _as_switched(switched, t: int) -> np.ndarray:
+    """switched -> bool (T,). 길이가 다르거나 0/1이 아닌 값이 있으면 ValueError."""
+    arr = np.asarray(switched)
+    if arr.dtype != np.bool_:
+        if arr.dtype.kind not in "iuf" or (arr.size and not np.all((arr == 0) | (arr == 1))):
+            raise ValueError("switched must be bool (or 0/1)")
+    arr = arr.astype(bool)
+    if arr.shape != (t,):
+        raise ValueError(f"switched shape {arr.shape} != ({t},)")
+    return arr
+
+
+def _as_arrays(ts, kps, bbox, present, frame_wh, switched=None) -> Dict[str, np.ndarray]:
+    """형식에 맞는 dtype으로 바꾸고 shape를 검사합니다. 어긋나면 ValueError. switched가 None이면 키를 넣지 않음."""
     ts = np.asarray(ts, dtype=np.float64).reshape(-1)
     t = ts.shape[0]
     kps = np.asarray(kps, dtype=np.float32)
@@ -56,12 +74,18 @@ def _as_arrays(ts, kps, bbox, present, frame_wh) -> Dict[str, np.ndarray]:
         raise ValueError("ts must be non-decreasing")
     if not (np.all(np.isfinite(kps)) and np.all(np.isfinite(bbox))):
         raise ValueError("kps/bbox have non-finite values")
-    return {"ts": ts, "kps": kps, "bbox": bbox, "present": present, "frame_wh": frame_wh}
+    out = {"ts": ts, "kps": kps, "bbox": bbox, "present": present, "frame_wh": frame_wh}
+    if switched is not None:
+        out["switched"] = _as_switched(switched, t)
+    return out
 
 
-def save_clip(path, ts, kps, bbox, present, frame_wh, meta: Dict[str, Any]) -> None:
-    """클립 파일을 저장합니다 (검증 후 임시 파일에 쓰고 교체하므로 중단돼도 반쯤 쓴 파일이 남지 않음)."""
-    arrays = _as_arrays(ts, kps, bbox, present, frame_wh)
+def save_clip(path, ts, kps, bbox, present, frame_wh, meta: Dict[str, Any], switched=None) -> None:
+    """
+    클립 파일을 저장합니다 (검증 후 임시 파일에 쓰고 교체하므로 중단돼도 반쯤 쓴 파일이 남지 않음).
+    switched (T,) bool은 선택이며 None이면 파일에 쓰지 않습니다.
+    """
+    arrays = _as_arrays(ts, kps, bbox, present, frame_wh, switched)
     meta = dict(meta or {})
     # 파생 값은 항상 실제 배열 기준으로 덮어씀 (잘라낸 클립을 다시 저장할 때 예전 값이 남지 않도록)
     meta["clip_format_version"] = CLIP_FORMAT_VERSION
@@ -85,17 +109,22 @@ def save_clip(path, ts, kps, bbox, present, frame_wh, meta: Dict[str, Any]) -> N
 
 
 def load_clip(path) -> Dict[str, Any]:
-    """클립 파일을 읽습니다. meta는 dict로 풀어서 반환합니다."""
+    """클립 파일을 읽습니다. meta는 dict로 풀어서 반환합니다. switched는 파일에 있을 때만 키가 생깁니다."""
     with np.load(os.fspath(path), allow_pickle=False) as z:
         missing = [k for k in CLIP_KEYS if k not in z.files]
         if missing:
             raise ValueError(f"clip file missing keys: {missing}")
         out = {k: z[k] for k in CLIP_KEYS if k != "meta"}
+        for k in OPTIONAL_KEYS:
+            if k in z.files:
+                out[k] = z[k]
         meta = json.loads(str(z["meta"][()]))
     ver = int(meta.get("clip_format_version", 0))
     if ver > CLIP_FORMAT_VERSION:
         raise ValueError(f"clip_format_version {ver} is newer than supported {CLIP_FORMAT_VERSION}")
-    _as_arrays(out["ts"], out["kps"], out["bbox"], out["present"], out["frame_wh"])
+    checked = _as_arrays(out["ts"], out["kps"], out["bbox"], out["present"], out["frame_wh"], out.get("switched"))
+    if "switched" in checked:
+        out["switched"] = checked["switched"]
     out["meta"] = meta
     return out
 
@@ -142,7 +171,8 @@ def _default_frame_wh() -> List[int]:
 
 
 def _assemble(ts_abs: List[float], frames: List[Optional[np.ndarray]], bboxes: List[Any],
-              frame_wh: Optional[Sequence[int]], meta: Dict[str, Any]) -> Dict[str, Any]:
+              frame_wh: Optional[Sequence[int]], meta: Dict[str, Any],
+              switched: Optional[List[bool]] = None) -> Dict[str, Any]:
     t = len(ts_abs)
     kps = np.zeros((t, NUM_KPS, 3), dtype=np.float32)
     bbox = np.zeros((t, 4), dtype=np.float32)
@@ -171,7 +201,7 @@ def _assemble(ts_abs: List[float], frames: List[Optional[np.ndarray]], bboxes: L
         meta.setdefault("native_fps", None)
     meta.setdefault("created_at", _now_iso())
 
-    arrays = _as_arrays(ts, kps, bbox, present, frame_wh)
+    arrays = _as_arrays(ts, kps, bbox, present, frame_wh, switched)
     arrays["meta"] = meta
     return arrays
 
@@ -183,11 +213,13 @@ def from_obs_records(obs_list: Iterable[Dict[str, Any]], **meta: Any) -> Dict[st
     - tracks[0].keypoints_raw가 있으면 그것을, 없으면 keypoints를 사용 (스무딩 전 원시값 우선)
     - ts는 첫 obs 기준 상대 시간, frame_shape (h, w)에서 frame_wh를 얻음 (마지막 기록값)
     - 사람이 없는 obs는 kps/bbox 0, present False
+    - obs["target_switched"] -> switched (없으면 False)
     - 추가 키워드 인자는 meta에 들어감 (dataset, clip_id 등)
     """
     ts_abs: List[float] = []
     frames: List[Optional[np.ndarray]] = []
     bboxes: List[Any] = []
+    switched: List[bool] = []
     frame_wh = None
     for obs in obs_list:
         if not isinstance(obs, dict) or obs.get("ts") is None:
@@ -203,14 +235,16 @@ def from_obs_records(obs_list: Iterable[Dict[str, Any]], **meta: Any) -> Dict[st
         ts_abs.append(float(obs["ts"]))
         frames.append(frame)
         bboxes.append(t0.get("bbox"))
+        switched.append(bool(obs.get("target_switched", False)))
     if len(ts_abs) >= 2 and any(b < a for a, b in zip(ts_abs, ts_abs[1:])):
         # 리플레이 재시작 등으로 시간이 섞였으면 시간순으로 정렬 (안정 정렬)
         order = sorted(range(len(ts_abs)), key=lambda i: ts_abs[i])
         ts_abs = [ts_abs[i] for i in order]
         frames = [frames[i] for i in order]
         bboxes = [bboxes[i] for i in order]
+        switched = [switched[i] for i in order]
     meta.setdefault("source", "obs_records")
-    return _assemble(ts_abs, frames, bboxes, frame_wh, meta)
+    return _assemble(ts_abs, frames, bboxes, frame_wh, meta, switched)
 
 
 def from_sidecar(sidecar: Dict[str, Any], **meta: Any) -> Dict[str, Any]:
@@ -220,7 +254,7 @@ def from_sidecar(sidecar: Dict[str, Any], **meta: Any) -> Dict[str, Any]:
     snapshot.event_window {ts, kps, bbox, frame_wh?} (kp_buffer.window 결과)를 사용합니다.
     kp_buffer에서 missing인 프레임(None)은 0 + present False. frame_wh가 없던 예전 sidecar는
     런타임 카메라 기본 해상도로 채우고 meta.frame_wh_source="config_default"로 표시합니다.
-    event_window가 없으면 ValueError.
+    event_window가 없으면 ValueError. sidecar에는 대상 전환 기록이 없어 switched 키를 만들지 않습니다.
     """
     snap = sidecar.get("snapshot") or {}
     win = snap.get("event_window")
@@ -254,5 +288,6 @@ def from_sidecar(sidecar: Dict[str, Any], **meta: Any) -> Dict[str, Any]:
 
 
 def save_clip_dict(path, clip: Dict[str, Any]) -> None:
-    """from_obs_records/from_sidecar/load_clip 결과를 그대로 저장합니다."""
-    save_clip(path, clip["ts"], clip["kps"], clip["bbox"], clip["present"], clip["frame_wh"], clip["meta"])
+    """from_obs_records/from_sidecar/load_clip 결과를 그대로 저장합니다 (switched가 있으면 함께)."""
+    save_clip(path, clip["ts"], clip["kps"], clip["bbox"], clip["present"], clip["frame_wh"], clip["meta"],
+              switched=clip.get("switched"))
