@@ -92,14 +92,16 @@ CNN이 실제 낙상 알람을 조용히 지우는 경로를 막았습니다. �
 수용영역은 10프레임(Jetson 기준 약 0.7초)이며 입력 길이가 30프레임으로 고정되어 있습니다.
 모델이 낙상 동작이 아닌 "누워서 정지" 구간을 보는 문제를 먼저 고쳐야 구조 개선이 의미를 가집니다.
 
-### Day 4: 학습과 운영 입력 통일 (모델은 그대로)
+### Day 4: 학습과 운영 입력 통일 ✅ (모델은 그대로)
 
-- `app/ai_classifier/features.py` v2: 타임스탬프 기준 15Hz 리샘플링, 0.2초 이하 공백만 보간하고 나머지는 마스크,
-  등방 픽셀 좌표와 몸통 길이 스케일 정규화, 전역 골반 궤적, 초당 속도, 몸통 각도, bbox 종횡비, conf 마스크
-- `training/datasets/extract_npz.py`: 영상별 중간 포맷(ts, kps 17x3, bbox, frame_wh, frame_label, 메타)
-- `training/datasets/urfd_labels.py`: URFD cam0 프레임 라벨(-1/0/1) 파서, cam0/cam1 같은 event_group
-- `kp_buffer`/sidecar에 frame_w/h 기록, 가중치 `meta.json` 검증(불일치 시 fail-open)
-- [owner, GPU] URFD YOLO 추출만 실행
+- [x] `features.py` v2 (92채널): 타임스탬프 기준 15Hz 리샘플링(0.2초 이하 공백만 보간, 나머지는 마스크),
+  등방 픽셀 + 몸통 길이 스케일 정규화, 초당 속도, 전역 골반 궤적, 몸통 각도, bbox 종횡비, conf 마스크, 좌우 반전
+- [x] 클립 키포인트 형식(`training/datasets/clipfmt.py`)과 추출기(`extract_keypoints.py`):
+  운영과 같은 대상 선택(`app/engine/target_select.py`로 분리), 이어서 실행, 영상 단위 실패 격리
+- [x] 통합 manifest(`manifest.py`, `build_manifest.py`): OmniFall 구간 라벨 + URFD 프레임 라벨(`urfd_labels.py`) +
+  Figshare 폴더 라벨, 2,726개 영상, 다시점/중복 영상 event_group 병합, URFD RGB 영역 crop
+- [x] `kp_buffer`/sidecar에 frame_wh 기록, 가중치 `<weights>.meta.json` 검증(불일치 시 fail-open), 학습 시 meta 자동 기록
+- [ ] [owner, GPU] 전체 키포인트 추출: `python -m training.datasets.extract_keypoints --manifest dataset/_manifest/manifest_v1.jsonl --device 0`
 
 ### Day 5: 라벨, 창, 분할과 데이터 분석 (CPU)
 

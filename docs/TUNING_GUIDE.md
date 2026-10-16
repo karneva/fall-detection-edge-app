@@ -176,6 +176,9 @@
 - `enabled: False`면 AI 없이 룰 기반으로만 동작합니다 (알람은 정상 송출).
 - `/health`, `/level1/status` 응답의 `ai_classifier` 항목에서도 같은 정보를 볼 수 있습니다.
   (분류기가 아직 로드되기 전이면 `state: not_loaded`)
+- 가중치 옆의 `<weights>.meta.json`(학습 시 자동 생성)에 입력 특징 버전, 구조, 학습 데이터가 기록됩니다.
+  런타임이 처리할 수 없는 조합(예: `feature_version: v2` 가중치)이면 분류기를 끄고(fail-open) `load_error`에 이유를 남깁니다.
+  meta가 없는 기존 가중치는 v1로 간주합니다.
 
 shadow 모드로 현장 데이터 모으기:
 

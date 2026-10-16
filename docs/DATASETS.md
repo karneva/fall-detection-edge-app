@@ -86,11 +86,61 @@ python -m training.datasets.fetch_public extract gmdcsa24      # 경로 조작�
 | `figshare_ursul29` | Fall Dataset 29 Subjects | 2.5GB | mp4 2,018개, md5 일치 |
 | `charades` | Charades 480p + 주석 (하드 네거티브 후보) | 16.3GB | mp4 9,848개 |
 | `wanfall_synthetic` | 합성 낙상 (사전학습 전용) | 9.7GB | mp4 12,000개, HF sha256 일치 |
+| `urfd` | URFD cam0 영상 + 프레임 상태 라벨 CSV (CC BY-NC-SA 4.0) | 94MB | mp4 70개 (낙상 30, ADL 40) |
 
 원본과 압축 해제본을 합치면 약 104GB입니다. 압축 해제 후 `dataset/*/raw/`를 지우면 약 51GB를 줄일 수 있습니다.
 
 받은 파일의 URL, 크기, sha256은 `dataset/_downloads.json`에 남습니다.
 UP-Fall(약 850GB), OOPS(45GB 스트리밍), EDF/OCCU(깊이 전용)는 공개지만 크기나 용도 때문에 넣지 않았습니다.
+
+## 통합 manifest와 키포인트 추출
+
+데이터셋마다 다른 라벨을 하나의 형식으로 모은 뒤, 운영과 같은 YOLOv8-Pose로 키포인트를 추출합니다.
+
+```bash
+# 1. 통합 manifest (표준 라이브러리만 사용, 몇 초)
+python -m training.datasets.build_manifest --out dataset/_manifest/manifest_v1.jsonl
+
+# 2. 키포인트 추출 (ultralytics 필요, GPU 권장. 이미 만든 클립은 건너뛰므로 중단 후 다시 실행 가능)
+python -m training.datasets.extract_keypoints --manifest dataset/_manifest/manifest_v1.jsonl --device 0
+python -m training.datasets.extract_keypoints --manifest dataset/_manifest/manifest_v1.jsonl --datasets urfd le2i --limit 5
+```
+
+manifest 한 줄 = 영상 하나:
+
+```json
+{"clip_id": "le2i/Coffee_room_01/video_1", "dataset": "le2i",
+ "video": "dataset/le2i/extracted/FallDataset/Coffee_room_01/Coffee_room_01/Videos/video (1).avi", "label": "fall",
+ "segments": [{"cls": "walk", "start_s": 0.363, "end_s": 1.61256}, {"cls": "fall", "start_s": 1.55006, "end_s": 3.5709},
+              {"cls": "fallen", "start_s": 3.571, "end_s": 6.2584}],
+ "fall_start_s": 1.55006, "fall_end_s": 3.5709, "subject": "1", "cam": "1",
+ "event_group": "le2i/Coffee_room_01/video_1", "label_source": "omnifall",
+ "license": "CC BY-NC-SA 3.0; labels: OmniFall CC BY-NC-SA 4.0"}
+```
+
+- 라벨: Le2i·CAUCAFall·GMDCSA24·MCFD는 OmniFall 16클래스 구간, URFD는 프레임 상태 CSV(0 → fall, 1 → lying),
+  Figshare는 폴더(Fall/ADL) 단위
+- `event_group`: 같은 사건의 다른 시점(MCFD 카메라 8대)과 바이트가 같은 중복 영상은 같은 그룹 → 분할 시 함께 이동
+- `crop_px`: URFD cam0 영상은 640x240 합성(왼쪽 깊이 | 오른쪽 RGB)이라 RGB 절반 `[320, 0, 640, 240]`만 사용
+
+추출 결과는 `dataset/_keypoints/v1/<clip_id>.npz` (`training/datasets/clipfmt.py`):
+`ts` (초), `kps` (T,17,3 정규화 x, y, conf), `bbox`, `present`, `frame_wh`, `meta`(fps, 추출 모델, 대상 전환 수 등).
+운영 중 저장된 obs 녹화와 이벤트 sidecar도 같은 형식으로 읽을 수 있습니다 (`from_obs_records`, `from_sidecar`).
+
+manifest v1 구성 (2026-10-16):
+
+| 데이터셋 | 영상 | 낙상 / ADL | event_group | 라벨 |
+| --- | --- | --- | --- | --- |
+| le2i | 190 | 130 / 60 | 187 (중복 3쌍 병합) | OmniFall 구간 |
+| caucafall | 100 | 50 / 50 | 100 | OmniFall 구간 |
+| gmdcsa24 | 160 | 78 / 82 | 160 | OmniFall 구간 |
+| mcfd | 192 | 184 / 8 | 24 (시나리오) | OmniFall 구간 |
+| urfd | 70 | 30 / 40 | 70 | 프레임 상태 CSV |
+| figshare_ursul29 | 2,014 | 997 / 1,017 | 2,013 | 폴더 단위 (구간 없음) |
+| 합계 | 2,726 | 1,469 / 1,257 | | |
+
+OmniFall 라벨 경로는 모두 로컬 영상 하나에 정확히 대응합니다 (미매칭 0, 중복 매칭 0).
+GMDCSA24 `Subject_2/Fall/03`은 Fall 폴더에 있지만 OmniFall 라벨(눕기)을 따라 ADL로 분류했습니다.
 
 ## 확보 순서
 
