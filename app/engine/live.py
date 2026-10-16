@@ -2,13 +2,13 @@ import time
 from typing import Optional, Dict, Any, Tuple
 
 import cv2
-import torch
 from ultralytics import YOLO
 
 from ..config import FRAME_W, FRAME_H, DEFAULT_CONF, USE_HALF
 from ..core import build_observation
 from ..media.jpeg import encode_jpeg
 from .smoothing import ema_smooth_keypoints_inplace
+from .target_select import calculate_iou, select_target_index  # noqa: F401 (calculate_iou: 기존 공개 이름 유지)
 
 # COCO 17개 키포인트 연결(엣지) 정의
 COCO17_EDGES = [
@@ -54,57 +54,20 @@ def draw_skeleton_norm(frame, keypoints, conf_thr=0.3, edges=COCO17_EDGES,
         if a in pts and b in pts:
             cv2.line(frame, pts[a], pts[b], color, line_thickness)
 
-def calculate_iou(box1, box2):
-    """두 바운딩 박스 간의 IoU(Intersection over Union)를 계산합니다."""
-    x1 = max(box1[0], box2[0])
-    y1 = max(box1[1], box2[1])
-    x2 = min(box1[2], box2[2])
-    y2 = min(box1[3], box2[3])
-
-    inter_area = max(0, x2 - x1) * max(0, y2 - y1)
-    box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
-    box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
-
-    union_area = box1_area + box2_area - inter_area
-    if union_area <= 0:
-        return 0.0
-    return inter_area / union_area
-
 def select_best_person(results, last_bbox=None, iou_thresh=0.3):
     """
     이전 프레임의 위치 정보를 고려하여 추적할 최적의 대상을 선택합니다.
+    선택 규칙은 target_select.select_target_index (학습용 추출기와 공유)를 따릅니다.
     Returns: (results, is_switched)
     """
     if results.boxes is None or len(results.boxes) == 0:
         return results, False
 
-    best_idx = 0
-    is_switched = False
-    
-    if last_bbox is not None:
-        best_iou = -1.0
-        boxes = results.boxes.xyxy.cpu().numpy()
-        
-        # 1. IoU 기반 가장 가까운 후보 찾기
-        match_idx = -1
-        for i, box in enumerate(boxes):
-            iou = calculate_iou(last_bbox, box)
-            if iou > best_iou:
-                best_iou = iou
-                match_idx = i
-        
-        # 2. 최고 신뢰도 후보 찾기
-        top_conf_idx = int(torch.argmax(results.boxes.conf).item())
-        
-        # 3. 교체 결정 (IoU가 낮으면 스위칭 발생)
-        if match_idx != -1 and best_iou >= iou_thresh:
-            best_idx = match_idx
-        else:
-            best_idx = top_conf_idx
-            is_switched = True
-    else:
-        best_idx = int(torch.argmax(results.boxes.conf).item())
-        
+    # numpy(float32) 값을 그대로 넘겨 기존 torch 기반 계산과 같은 결과를 유지
+    boxes = results.boxes.xyxy.cpu().numpy()
+    confs = results.boxes.conf.cpu().numpy()
+    best_idx, is_switched = select_target_index(boxes, confs, last_bbox=last_bbox, iou_thresh=iou_thresh)
+
     results.boxes = results.boxes[best_idx:best_idx + 1]
     if getattr(results, "keypoints", None) is not None and results.keypoints is not None:
         results.keypoints = results.keypoints[best_idx:best_idx + 1]
