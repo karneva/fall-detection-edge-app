@@ -80,8 +80,17 @@ def states_to_segments(states, kind: str, fps: float = URFD_FPS) -> list:
         run = [state, frame, frame]
     if run is not None:
         segs.append(run)
-    return [{"cls": cmap[st], "start_s": round((f0 - 1) / fps, 6), "end_s": round(f1 / fps, 6)}
-            for st, f0, f1 in segs if st in cmap]
+    out = []
+    seen_lying = False
+    for st, f0, f1 in segs:
+        if st == STATE_LYING:
+            seen_lying = True
+        if st not in cmap:
+            continue
+        # 누운 뒤에 나오는 '0'(전이) 구간은 넘어지는/눕는 동작이 아니라 일어나는 동작
+        cls = "stand_up" if (st == STATE_FALLING and seen_lying) else cmap[st]
+        out.append({"cls": cls, "start_s": round((f0 - 1) / fps, 6), "end_s": round(f1 / fps, 6)})
+    return out
 
 
 def load_urfd_segments(csv_paths, fps: float = URFD_FPS) -> dict:

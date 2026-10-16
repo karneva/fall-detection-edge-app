@@ -109,6 +109,9 @@ CNN이 실제 낙상 알람을 조용히 지우는 경로를 막았습니다. �
 - `training/splits.py`: StratifiedGroupKFold(5, event_group), fold 배정 저장과 누수 테스트
 - Data card / EDA: fps 분포, 관절 결측률, 낙상 vs 하드 ADL 하강 속도 분포
 - 고전 ML 비교군: 손으로 만든 시계열 특징 + LogReg/GBDT, 특징 중요도
+- Day 4 리뷰에서 넘어온 주의점: Figshare 클립은 약 1.9초라 4초 창에 못 미침(짧은 창 또는 제외 결정 필요),
+  추출기는 운영의 품질 게이트(quality < 0.15, 대상 전환 후 1초 유예)를 적용하지 않음(Day 7 런타임 정렬 때 맞춤),
+  Le2i subject 값은 OmniFall 그대로라 교차 피험자 분할 전 확인 필요
 
 ### Day 6: 모델 zoo와 학습 하네스
 

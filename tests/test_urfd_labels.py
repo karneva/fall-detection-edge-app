@@ -44,6 +44,12 @@ class UrfdLabelsTest(unittest.TestCase):
         segs = states_to_segments([(1, 0), (2, -1), (3, 0)], "fall")
         self.assertEqual([s["cls"] for s in segs], ["fall", "fall"])
 
+    def test_transition_after_lying_is_stand_up(self):
+        # -1 -> 0 -> 1 -> 0: 누운 뒤의 전이 구간은 일어나는 동작
+        states = [(1, -1), (2, 0), (3, 1), (4, 1), (5, 0), (6, -1)]
+        self.assertEqual([s["cls"] for s in states_to_segments(states, "adl")], ["lie_down", "lying", "stand_up"])
+        self.assertEqual([s["cls"] for s in states_to_segments(states, "fall")], ["fall", "lying", "stand_up"])
+
     def test_read_csv_and_load(self):
         falls, adls = self.dir / "falls.csv", self.dir / "adls.csv"
         _write(falls, ["fall-01,1,-1,3.1,2.9", "fall-01,2,0,3.3,2.9", "fall-01,3,1,3.1,3.0", "",
