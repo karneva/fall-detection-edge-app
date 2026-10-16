@@ -19,7 +19,9 @@
   클립 끝에 마지막 프레임을 tail_s(기본 20초) 동안 반복해 붙입니다 ("마지막 자세가 계속 유지된다"는 가정).
   낙상/ADL 클립에 똑같이 적용하므로, 마지막에 누워 있는 ADL(침대 눕기 등)도 정지 판정을 받습니다.
   반복 프레임은 키포인트가 완전히 같아 실제 영상보다 '더 정지'해 있습니다.
-- 대상 전환(target_switched): 클립 파일에는 프레임별 전환 여부가 없어 항상 False (엔진의 1초 유예 미적용).
+- 대상 전환(target_switched): 클립에 프레임별 전환 기록(`switched`)이 있으면 그 프레임의 obs에 싣고
+  (엔진이 신호를 리셋하고 1초 유예), 없으면(전환 기록 이전에 추출한 클립) 항상 False.
+  15Hz로 고를 때 건너뛴 원본 프레임의 전환도 다음에 고른 프레임에 싣습니다 (운영은 전환이 난 프레임을 처리).
 - bbox conf(tracks[0].conf): 클립에 없어서 키포인트 conf 평균으로 대신함 (엔진은 사용하지 않음).
 - 원본 fps 30에서 15Hz로 고를 때 추출기의 IoU 대상 추적은 원본 fps에서 이루어진 결과를 그대로 씀.
 
@@ -41,6 +43,11 @@ logger = logging.getLogger(__name__)
 
 RUNTIME_HZ = 15.0
 FREEZE_TAIL_S = 20.0
+DEFAULT_T0 = 1000.0
+
+# 시간 기준 탐지(제때 탐지) 판정 창: ABNORMAL 진입/LEVEL1이 [fall_start - PRE, fall_end + POST] 안인지 (MODEL_STUDY와 같은 값)
+TIMELY_PRE_S = 2.0
+TIMELY_POST_S = 3.0
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_KP_DIR = REPO_ROOT / "dataset" / "_keypoints" / "v1"
@@ -49,8 +56,9 @@ NUM_KPS = 17
 _TS_EPS = 1e-6
 
 __all__ = [
-    "RUNTIME_HZ", "FREEZE_TAIL_S", "DEFAULT_KP_DIR",
-    "study_params", "resample_indices", "clip_to_obs", "run_clip", "clip_outcome", "summarize",
+    "RUNTIME_HZ", "FREEZE_TAIL_S", "DEFAULT_T0", "TIMELY_PRE_S", "TIMELY_POST_S", "DEFAULT_KP_DIR",
+    "study_params", "resample_indices", "clip_to_obs", "clip_end_s", "run_clip", "clip_outcome", "timing",
+    "summarize",
     "NullVerifier", "clip_path", "load_row_clip", "replay_rows",
 ]
 
@@ -117,7 +125,8 @@ def _frame_shape(frame_wh) -> Optional[Tuple[int, int]]:
 
 
 def _make_obs(ts: float, frame_index: int, kps_row: np.ndarray, bbox_row: np.ndarray, present: bool,
-              frame_shape: Optional[Tuple[int, int]], src_index: int, tail: bool) -> Dict[str, Any]:
+              frame_shape: Optional[Tuple[int, int]], src_index: int, tail: bool,
+              switched: bool = False) -> Dict[str, Any]:
     """build_observation과 같은 구조의 obs 하나 (키포인트 목록은 매번 새로 만듦: EMA가 제자리 수정하므로)."""
     kps: List[Dict[str, Any]] = []
     bbox_norm: Optional[List[float]] = None
@@ -145,7 +154,7 @@ def _make_obs(ts: float, frame_index: int, kps_row: np.ndarray, bbox_row: np.nda
             "quality_score": quality,
             "frame_shape": frame_shape,
         }],
-        "target_switched": False,
+        "target_switched": bool(switched),
         "meta": {
             "conf_thres": float(DEFAULT_CONF),
             "replay_src_index": int(src_index),
@@ -155,7 +164,7 @@ def _make_obs(ts: float, frame_index: int, kps_row: np.ndarray, bbox_row: np.nda
 
 
 def clip_to_obs(clip: Dict[str, Any], hz: float = RUNTIME_HZ, tail_s: float = FREEZE_TAIL_S,
-                t0: float = 1000.0) -> List[Dict[str, Any]]:
+                t0: float = DEFAULT_T0) -> List[Dict[str, Any]]:
     """
     클립 dict(clipfmt.load_clip 결과: ts, kps (T,17,3), bbox (T,4), present (T,), frame_wh)를
     운영과 같은 obs 목록으로 바꿉니다 (EMA 스무딩 적용, 클립마다 EMA 초기화).
@@ -164,6 +173,8 @@ def clip_to_obs(clip: Dict[str, Any], hz: float = RUNTIME_HZ, tail_s: float = FR
     - 이어서 마지막 원본 프레임을 round(tail_s * hz)개 반복 (정지 꼬리, ts는 1/hz 간격, tail_s <= 0이면 없음)
     - obs["meta"]["replay_src_index"]: 원본 프레임 번호, ["replay_tail"]: 꼬리 프레임 여부
     - frame_index는 0부터 연속
+    - clip["switched"] (T,) bool이 있으면 target_switched로 전달 (직전에 고른 프레임 이후 원본 프레임 중
+      하나라도 전환이면 True. 꼬리 프레임은 항상 False)
     """
     ts = np.asarray(clip["ts"], dtype=np.float64).reshape(-1)
     t = len(ts)
@@ -181,6 +192,7 @@ def clip_to_obs(clip: Dict[str, Any], hz: float = RUNTIME_HZ, tail_s: float = FR
     n_tail = int(round(float(tail_s) * float(hz))) if tail_s and tail_s > 0 else 0
     sources = [int(i) for i in idx] + [int(idx[-1])] * n_tail
     n_main = len(idx)
+    sw_main = _switch_flags(clip.get("switched"), idx, t)
     t_last = float(ts[idx[-1]])
     times = [float(t0) + float(ts[i]) for i in idx] + [
         float(t0) + t_last + (j + 1) / float(hz) for j in range(n_tail)]
@@ -190,13 +202,42 @@ def clip_to_obs(clip: Dict[str, Any], hz: float = RUNTIME_HZ, tail_s: float = FR
     try:
         for k, i in enumerate(sources):
             obs = _make_obs(times[k], k, kps[i], bbox[i], bool(present[i]), shape,
-                            src_index=int(i), tail=k >= n_main)
+                            src_index=int(i), tail=k >= n_main,
+                            switched=bool(sw_main[k]) if k < n_main else False)
             _smoothing.ema_smooth_keypoints_inplace(obs)
             out.append(obs)
     finally:
         # 다음 사용자(다른 클립, 운영 코드)가 이전 클립의 EMA 상태를 물려받지 않도록
         _smoothing._reset_ema_state()
     return out
+
+
+def _switch_flags(switched, idx: np.ndarray, t: int) -> np.ndarray:
+    """
+    고른 프레임별 대상 전환 여부. 고른 프레임 idx[k]와 그 직전에 고른 프레임 사이(직전 제외, 현재 포함)의 원본 프레임 중
+    하나라도 전환이면 True. 첫 프레임은 0..idx[0]. switched가 없거나 길이가 맞지 않으면 모두 False.
+    """
+    out = np.zeros(len(idx), dtype=bool)
+    if switched is None:
+        return out
+    sw = np.asarray(switched, dtype=bool).reshape(-1)
+    if sw.shape[0] != t or not np.any(sw):
+        return out
+    csum = np.concatenate(([0], np.cumsum(sw.astype(np.int64))))
+    prev = -1
+    for k, i in enumerate(idx):
+        out[k] = (csum[int(i) + 1] - csum[prev + 1]) > 0
+        prev = int(i)
+    return out
+
+
+def clip_end_s(obs_list: Sequence[Dict[str, Any]], t0: float = DEFAULT_T0) -> Optional[float]:
+    """정지 꼬리를 뺀 마지막 실제 프레임의 클립 시각 (초). obs가 없으면 None."""
+    last = None
+    for o in obs_list:
+        if not (o.get("meta") or {}).get("replay_tail"):
+            last = float(o["ts"]) - float(t0)
+    return last
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +292,51 @@ def _ai_p_fall(ev: Dict[str, Any]) -> Optional[float]:
     return None
 
 
-def clip_outcome(row: Dict[str, Any], events: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+def _num(v) -> Optional[float]:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def timing(row: Dict[str, Any], events: Sequence[Dict[str, Any]], t0: float = DEFAULT_T0,
+           end_s: Optional[float] = None) -> Dict[str, Any]:
+    """
+    시간 기준 탐지 정보 (클립 시각 = obs ts - t0, 라벨 구간과 같은 시간축).
+
+    abnormal_s: ABNORMAL 진입 시각 목록, level1_s: 첫 level1 시각,
+    level1_enter_s: 첫 level1을 낸 에피소드의 ABNORMAL 진입 시각 (level1 이전의 마지막 abnormal_enter),
+    in_tail: 첫 level1이 정지 꼬리 안 (end_s = 마지막 실제 프레임 시각을 줄 때만, 아니면 None).
+    낙상 클립(fall_start_s/fall_end_s가 있음)이고 level1이 있을 때만:
+      timely_strict: 진입이 [fall_start - 2, fall_end + 3] 안이고 level1이 fall_start 이후
+      timely_loose: 진입 또는 level1 중 하나가 그 창 안
+      untimely: 엄격 기준에서 제때가 아닌 이유 "level1_before_fall" | "enter_early" | "enter_late" (제때면 None)
+    그 밖에는 timely_* / untimely가 None.
+    """
+    ab = [float(e["ts"]) - t0 for e in events if e.get("type") == "abnormal_enter" and _num(e.get("ts")) is not None]
+    l1 = [e for e in events if e.get("type") == "level1" and _num(e.get("ts")) is not None]
+    out: Dict[str, Any] = {"abnormal_s": ab, "level1_s": None, "level1_enter_s": None, "in_tail": None,
+                           "timely_strict": None, "timely_loose": None, "untimely": None}
+    if not l1:
+        return out
+    t1 = float(l1[0]["ts"]) - t0
+    before = [a for a in ab if a <= t1 + 1e-9]
+    enter = before[-1] if before else None
+    out["level1_s"] = t1
+    out["level1_enter_s"] = enter
+    if end_s is not None:
+        out["in_tail"] = bool(t1 > float(end_s) + 1e-6)
+    fs, fe = _num(row.get("fall_start_s")), _num(row.get("fall_end_s"))
+    if row.get("label") != "fall" or fs is None or fe is None or enter is None:
+        return out
+    lo, hi = fs - TIMELY_PRE_S, fe + TIMELY_POST_S
+    enter_in = lo <= enter <= hi
+    out["timely_strict"] = bool(enter_in and t1 >= fs)
+    out["timely_loose"] = bool(enter_in or lo <= t1 <= hi)
+    if not out["timely_strict"]:
+        out["untimely"] = ("level1_before_fall" if t1 < fs else "enter_early" if enter < lo else "enter_late")
+    return out
+
+
+def clip_outcome(row: Dict[str, Any], events: Sequence[Dict[str, Any]], t0: float = DEFAULT_T0,
+                 end_s: Optional[float] = None) -> Dict[str, Any]:
     """
     클립 하나의 결과.
 
@@ -260,7 +345,8 @@ def clip_outcome(row: Dict[str, Any], events: Sequence[Dict[str, Any]]) -> Dict[
     reached_ai: LEVEL1 판정 지점까지 도달함 (level1 또는 ai_suppressed). AI는 거부권만 있으므로
                 이것이 규칙 엔진이 허용하는 탐지 상한입니다.
     추가: n_abnormal (ABNORMAL 진입 수), alarm_ts (첫 level1 시각),
-          p_fall (AI 호출마다 한 번씩의 p_fall. 억제 후 승격 이벤트는 억제 당시 판정을 다시 싣고 있으므로 제외)
+          p_fall (AI 호출마다 한 번씩의 p_fall. 억제 후 승격 이벤트는 억제 당시 판정을 다시 싣고 있으므로 제외),
+          timing(...)의 시간 기준 필드 (t0: clip_to_obs와 같은 값, end_s: clip_end_s(obs))
     """
     level1 = [e for e in events if e.get("type") == "level1"]
     sup = [e for e in events if e.get("type") == "ai_suppressed"]
@@ -278,6 +364,7 @@ def clip_outcome(row: Dict[str, Any], events: Sequence[Dict[str, Any]]) -> Dict[
         "n_abnormal": sum(1 for e in events if e.get("type") == "abnormal_enter"),
         "p_fall": p_fall,
         "alarm_ts": float(level1[0]["ts"]) if level1 else None,
+        **timing(row, events, t0=t0, end_s=end_s),
     }
 
 
@@ -303,6 +390,12 @@ def _stats(outcomes: List[Dict[str, Any]]) -> Dict[str, Any]:
     fa_rate = _ratio(n_fa, n_adl)
     spec = None if fa_rate is None else 1.0 - fa_rate
     precision = _ratio(n_det, n_det + n_fa)
+    # 시간 기준 탐지: 낙상 클립 모두에 timely 판정이 있을 때만 (옛 결과 파일이나 라벨 구간이 없는 낙상이면 None)
+    timed = n_fall > 0 and all(("timely_strict" in o) and (o["timely_strict"] is not None or not o["alarm"])
+                               for o in falls)
+    n_timely = sum(1 for o in falls if o.get("timely_strict")) if timed else None
+    n_timely_loose = sum(1 for o in falls if o.get("timely_loose")) if timed else None
+    timely_recall = _ratio(n_timely, n_fall) if timed else None
     return {
         "n_fall": n_fall,
         "n_adl": n_adl,
@@ -325,6 +418,12 @@ def _stats(outcomes: List[Dict[str, Any]]) -> Dict[str, Any]:
         "n_adl_reached": n_adl_reached,
         "precision": precision,
         "f1": _hmean(recall, precision),
+        # 제때 탐지 (timing 참고): 엄격 기준 recall과 그것으로 계산한 balanced, 느슨한 기준 recall
+        "n_timely": n_timely,
+        "timely_recall": timely_recall,
+        "timely_balanced": _hmean(timely_recall, spec),
+        "n_timely_loose": n_timely_loose,
+        "timely_recall_loose": _ratio(n_timely_loose, n_fall) if timed else None,
     }
 
 
@@ -380,5 +479,5 @@ def replay_rows(rows: Iterable[Dict[str, Any]], params: Level1Params, verifier=N
         if on_event is not None:
             cb = (lambda ev, eng, _row=row: on_event(_row, ev, eng))
         events, _ = run_clip(obs, params, verifier=verifier, on_event=cb)
-        outcomes.append(clip_outcome(row, events))
+        outcomes.append(clip_outcome(row, events, end_s=clip_end_s(obs)))
     return outcomes

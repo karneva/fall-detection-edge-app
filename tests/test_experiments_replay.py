@@ -348,6 +348,95 @@ class OutcomeSummaryTest(unittest.TestCase):
         self.assertEqual((e["n_fall"], e["n_adl"], e["by_dataset"]), (0, 0, {}))
 
 
+@unittest.skipUnless(HAS_NUMPY, "numpy not installed")
+class TimingTest(unittest.TestCase):
+    """시간 기준 탐지: 클립 시각 = ts - t0, 창 [fall_start - 2, fall_end + 3]"""
+
+    ROW = {"clip_id": "d/f", "dataset": "d", "label": "fall", "fall_start_s": 5.0, "fall_end_s": 6.0}
+
+    def _ev(self, enter_s, level1_s, t0=1000.0):
+        return [{"type": "abnormal_enter", "ts": t0 + enter_s}, {"type": "level1", "ts": t0 + level1_s}]
+
+    def test_categories(self):
+        cases = [
+            (4.0, 14.0, True, True, None),                     # 진입이 창 안, LEVEL1이 낙상 이후
+            (2.0, 4.5, False, True, "level1_before_fall"),     # LEVEL1이 낙상보다 먼저 (진입도 이름)
+            (1.0, 11.0, False, True, "enter_early"),           # 진입이 2초 넘게 먼저, LEVEL1은 창 밖
+            (0.5, 8.5, False, True, "enter_early"),            # 진입은 이르지만 LEVEL1이 창 안 -> 느슨한 기준만 통과
+            (9.5, 19.5, False, False, "enter_late"),           # 진입이 fall_end + 3초보다 늦음
+        ]
+        for enter, l1, strict, loose, why in cases:
+            t = replay.timing(self.ROW, self._ev(enter, l1))
+            self.assertEqual((t["timely_strict"], t["untimely"]), (strict, why), (enter, l1))
+            if enter == 1.0:
+                self.assertFalse(t["timely_loose"])
+            elif strict or enter == 0.5:
+                self.assertTrue(t["timely_loose"])
+            self.assertAlmostEqual(t["level1_enter_s"], enter)
+
+    def test_episode_is_last_enter_before_level1(self):
+        ev = [{"type": "abnormal_enter", "ts": 1001.0}, {"type": "abnormal_exit", "ts": 1003.0},
+              {"type": "abnormal_enter", "ts": 1004.5}, {"type": "level1", "ts": 1015.0},
+              {"type": "abnormal_enter", "ts": 1030.0}]
+        t = replay.timing(self.ROW, ev, end_s=12.0)
+        self.assertEqual(t["abnormal_s"], [1.0, 4.5, 30.0])
+        self.assertAlmostEqual(t["level1_enter_s"], 4.5)
+        self.assertTrue(t["timely_strict"])
+        self.assertTrue(t["in_tail"])
+        self.assertFalse(replay.timing(self.ROW, ev, end_s=20.0)["in_tail"])
+        self.assertIsNone(replay.timing(self.ROW, ev)["in_tail"])
+
+    def test_no_label_or_no_alarm(self):
+        adl = replay.timing({"label": "adl"}, self._ev(1.0, 11.0))
+        self.assertIsNone(adl["timely_strict"])
+        self.assertAlmostEqual(adl["level1_s"], 11.0)
+        miss = replay.timing(self.ROW, [{"type": "abnormal_enter", "ts": 1004.0}])
+        self.assertIsNone(miss["level1_s"])
+        self.assertIsNone(miss["timely_strict"])
+
+    def test_summarize_timely(self):
+        def o(row, events):
+            return replay.clip_outcome(row, events)
+        fall2 = dict(self.ROW, clip_id="d/g")
+        outs = [o(self.ROW, self._ev(4.0, 14.0)),        # 제때
+                o(fall2, self._ev(1.0, 11.0)),           # 탐지했지만 제때 아님
+                o(dict(self.ROW, clip_id="d/h"), []),    # 놓침
+                o({"clip_id": "d/a", "dataset": "d", "label": "adl"}, [])]
+        s = replay.summarize(outs)
+        self.assertEqual((s["n_detected"], s["n_timely"], s["n_timely_loose"]), (2, 1, 1))
+        self.assertAlmostEqual(s["timely_recall"], 1 / 3)
+        self.assertAlmostEqual(s["timely_balanced"], 2 * (1 / 3) * 1.0 / (1 / 3 + 1.0))
+        # 옛 결과 파일(시간 필드 없음)은 None
+        old = [{k: v for k, v in x.items() if k in ("clip_id", "dataset", "label", "alarm", "suppressed",
+                                                     "reached_ai")} for x in outs]
+        self.assertIsNone(replay.summarize(old)["timely_recall"])
+
+
+@unittest.skipUnless(HAS_NUMPY, "numpy not installed")
+class SwitchReplayTest(unittest.TestCase):
+    def test_switch_flags_cover_skipped_frames(self):
+        sw = np.zeros(10, dtype=bool)
+        sw[3] = True    # 고르지 않은 프레임의 전환은 다음에 고른 프레임에
+        sw[8] = True
+        flags = replay._switch_flags(sw, np.array([0, 2, 4, 6, 8]), 10)
+        self.assertEqual(flags.tolist(), [False, False, True, False, True])
+        self.assertFalse(replay._switch_flags(None, np.array([0, 1]), 2).any())
+        self.assertFalse(replay._switch_flags(np.ones(3, bool), np.array([0, 1]), 2).any())  # 길이 불일치
+
+    def test_clip_to_obs_sets_target_switched(self):
+        clip, _ = _synth_clip()
+        t = len(clip["ts"])
+        base = replay.clip_to_obs(clip)
+        self.assertFalse(any(o["target_switched"] for o in base))
+        sw = np.zeros(t, dtype=bool)
+        sw[t // 2] = True
+        obs = replay.clip_to_obs(dict(clip, switched=sw))
+        hit = [o for o in obs if o["target_switched"]]
+        self.assertEqual(len(hit), 1)
+        self.assertFalse(hit[0]["meta"]["replay_tail"])
+        self.assertGreaterEqual(hit[0]["meta"]["replay_src_index"], t // 2)
+
+
 @unittest.skipUnless(HAS_TORCH, "numpy/torch not installed")
 class VerifierTest(unittest.TestCase):
     def setUp(self):
