@@ -180,6 +180,31 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 설정은 모두 환경변수로 바꿀 수 있습니다. 전체 목록은 [`.env.example`](.env.example), 튜닝 방법은 [TUNING_GUIDE](docs/TUNING_GUIDE.md)를 보세요.
 
+## 실험 결과
+
+공개 데이터 5종의 평가 클립 712개(낙상 472, ADL 240)로 비교했습니다. 사건 단위 5-fold로 나눠 같은 사건이
+학습과 평가에 함께 들어가지 않게 했고, Jetson과 같은 15Hz 상태 머신으로 재생해 클립 단위로 셌습니다.
+
+| 단계 | 바꾼 것 | 낙상 탐지율 | ADL 오탐률 | Balanced |
+| --- | --- | --- | --- | --- |
+| A | 규칙만 | 0.608 | 0.323 | 0.635 |
+| B | + 1D CNN, URFD만 학습 (원래 방식) | 0.291 | 0.099 | 0.434 |
+| C | + 학습 데이터 추가 (6개 데이터셋) | 0.583 | 0.174 | 0.682 |
+| D | + 학습 창을 운영 입력과 맞춤 | 0.517 | 0.075 | 0.662 |
+| E0 | + 낙상 순간(ABNORMAL 진입 구간) 특징, 고전 ML | 0.543 | 0.061 | 0.686 |
+| E0max | + 진입 이후 창들의 최대 확률로 판정 (재학습 없음) | 0.595 | 0.112 | 0.711 |
+
+탐지율과 오탐률은 5개 fold 평균, Balanced는 탐지율과 (1 - 오탐률)의 조화평균입니다.
+
+- **원래 방식은 규칙만보다 나빴습니다.** 1D CNN이 규칙이 잡은 실제 낙상의 절반 이상을 지웠습니다.
+- **가장 큰 개선은 데이터였습니다.** 모델을 그대로 두고 데이터만 늘린 C가 B보다 balanced +0.248입니다.
+- **판정 창 선택이 모델 종류보다 중요했습니다.** 고전 ML, CNN, TCN의 차이는 fold 편차 안이었습니다.
+  같은 모델이라도 진입 이후 창들의 최댓값으로 판정하면(E\*) 세 모델 모두 좋아졌습니다.
+- **탐지율의 상한은 규칙 엔진 앞단입니다.** AI는 거부만 할 수 있어 탐지율이 0.608을 넘지 못합니다.
+  놓친 낙상의 약 2/3는 바닥에 누운 사람을 포즈 모델이 검출하지 못한 경우였습니다. 그래서 다음 단계는 포즈 모델 개선입니다.
+
+자세한 프로토콜과 주의점은 [MODEL_STUDY](docs/MODEL_STUDY.md), 원인 분석은 [FAILURE_ANALYSIS](docs/FAILURE_ANALYSIS.md)에 있습니다.
+
 ## 평가와 테스트
 
 모델이나 파라미터를 바꿀 때마다 **이벤트 단위 지표**(낙상 탐지율, 시간당 오탐, 알람 지연)로 비교하고,
@@ -202,6 +227,10 @@ python -m app.eval.compare_results <baseline.json> runs/eval/field_v1_<sha>.json
 # 데이터 없이 엔진 동작 확인 (합성 시나리오)
 python -m app.eval.replay_eval --synthetic
 
+# 공개 데이터 5-fold 단계별 실험, 실패 원인 분석
+python -m training.experiments.run_progression --stages A,B,C,D,E,Es,F --folds 0-4 --seeds 3 --jobs 5
+python -m training.experiments.failure_analysis --out dataset/_experiments/failure_v1
+
 # 테스트 (판단 엔진은 표준 라이브러리만으로 동작, numpy/torch 테스트는 없으면 skip)
 python -m unittest discover -s tests -t .
 ```
@@ -211,14 +240,18 @@ AI 실패 시 알람이 유지되는지 확인하는 **fail-open 테스트**가 
 
 ## 학습 데이터와 재학습
 
-- 공개 데이터셋 **URFD**와 직접 촬영한 낙상/일상 동작 데이터로 1D CNN을 학습했습니다.
-- 추가로 확보할 공개 데이터(Le2i, CAUCAFall, GMDCSA24, AI-Hub 낙상 데이터 등)의 우선순위와 라이선스는 [DATASETS](docs/DATASETS.md)에 정리했습니다.
+- 공개 데이터 6종(Le2i, CAUCAFall, GMDCSA24, MCFD, URFD, Figshare 29 Subjects)의 영상 2,726개를 하나의 manifest로 모았습니다.
+  - 라벨: OmniFall 구간 라벨과 URFD 프레임 라벨을 통합
+  - 키포인트: 운영과 같은 YOLOv8-Pose와 대상 선택 규칙으로 추출
+- 데이터셋별 구성과 품질은 [DATA_CARD](docs/DATA_CARD.md), 수집 경위와 라이선스는 [DATASETS](docs/DATASETS.md)에 있습니다.
 - AI가 일상 동작으로 판단한 사건은 `runs/clips/not_fall/`과 `runs/events/`에 쌓여 재학습 재료가 됩니다.
 
 ```bash
 pip install -r requirements-train.txt     # + CUDA에 맞는 torch (GPU 학습 머신)
-python -m training.dataset_builder        # URFD -> 학습 배열
-python -m training.train                  # 1D CNN 학습 -> app/ai_classifier/weights/
+python -m training.datasets.fetch_public download omnifall_labels le2i caucafall gmdcsa24 mcfd urfd figshare_ursul29
+python -m training.datasets.build_manifest --out dataset/_manifest/manifest_v1.jsonl
+python -m training.datasets.extract_keypoints --manifest dataset/_manifest/manifest_v1.jsonl --device 0
+python -m training.datasets.data_card --out docs/DATA_CARD.md
 python -m training.retrain_from_runs      # 현장 클립으로 액티브 러닝 재학습
 ```
 
@@ -241,8 +274,10 @@ python -m training.retrain_from_runs      # 현장 클립으로 액티브 러닝
 │   ├── state/              #   장치 등록·토큰 상태
 │   └── eval/               #   오프라인 평가 도구
 ├── training/               # 학습·데이터 준비 (GPU 학습 머신)
+│   ├── datasets/           #   공개 데이터 다운로드, 통합 manifest, 키포인트 추출, 데이터 카드
+│   └── experiments/        #   5-fold 분할, 운영 동일 재생, 창 생성, 모델, 단계별 실험, 실패 분석
 ├── scripts/jetson/         # TensorRT 변환, 벤치마크, IP 보고
-├── eval/                   # 평가 baseline, 라벨/manifest 예시
+├── eval/                   # 평가 baseline, 라벨/manifest 예시, 직접 확인 태그
 ├── tests/                  # 회귀 테스트
 └── docs/                   # 상세 문서
 ```
@@ -251,7 +286,8 @@ python -m training.retrain_from_runs      # 현장 클립으로 액티브 러닝
 
 - **하이브리드 판단**: 빠르고 설명 가능한 규칙 엔진 + 오탐을 줄이는 딥러닝 검증
 - **안전 우선 AI 연동**: 가중치 누락·추론 오류·이상값이면 알람 유지(fail-open), 억제된 사건도 계속 감시 후 승격
-- **측정 기반 개발**: 이벤트 단위 오프라인 평가와 채택 게이트, 합성 시나리오 회귀 테스트
+- **측정 기반 개발**: 이벤트 단위 오프라인 평가와 채택 게이트, 공개 데이터 5-fold 단계별 실험, 합성 시나리오 회귀 테스트
+- **원인 분석 후 개선**: 실패 사례를 원인별로 세고 프레임으로 확인한 뒤 다음 작업을 정함
 - **현장 데이터 루프**: 사건마다 판정 근거(키포인트 구간, AI 입력, 파라미터)를 sidecar로 저장해 재학습에 활용
 - **운영 고려**: QR 페어링, 토큰 자동 갱신, 사고 영상 업로드, 스트리밍, Docker 배포
 
@@ -264,7 +300,7 @@ python -m training.retrain_from_runs      # 현장 클립으로 액티브 러닝
 | [EVALUATION_PROTOCOL](docs/EVALUATION_PROTOCOL.md) | 이벤트 단위 평가 절차, 채택 규칙, 평가셋 관리 |
 | [TUNING_GUIDE](docs/TUNING_GUIDE.md) | 파라미터와 환경변수 튜닝 |
 | [OPERATIONS](docs/OPERATIONS.md) | 실행, API, 저장 파일, 운영 점검 |
-| [ROADMAP](docs/ROADMAP.md) | 1D CNN 고도화 계획과 진행 상황 |
+| [ROADMAP](docs/ROADMAP.md) | 고도화 계획과 진행 상황 (원인 분석 → 이상 탐지 → 포즈 모델 → 엣지 최적화) |
 | [DATASETS](docs/DATASETS.md) | 추가 학습 데이터 후보, 확보 순서, 라이선스 |
 | [MODEL_STUDY](docs/MODEL_STUDY.md) | 규칙만 → 1D CNN + URFD → 데이터 추가 → 모델 변경 단계별 개선 수치 (5-fold) |
 | [FAILURE_ANALYSIS](docs/FAILURE_ANALYSIS.md) | 규칙 엔진이 놓친 낙상과 오탐의 원인 분석 (누운 사람 포즈 미검출이 약 2/3) |
@@ -296,9 +332,3 @@ python -m training.retrain_from_runs      # 현장 클립으로 액티브 러닝
 ```
 
 </details>
-
-## 한계
-
-- 한 장면에서 가장 확실한 한 사람을 추적합니다. 다인원 ID 추적 시스템은 아닙니다.
-- 카메라 높이와 각도에 따라 임계값 민감도가 달라질 수 있습니다.
-- 현재 1D CNN은 낙상 순간이 아니라 확정 직전의 정지 구간을 봅니다. 개선 계획은 [ROADMAP](docs/ROADMAP.md)에 있습니다.
