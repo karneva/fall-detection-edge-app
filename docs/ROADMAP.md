@@ -103,6 +103,17 @@ CNN이 실제 낙상 알람을 조용히 지우는 경로를 막았습니다. �
 - [x] `kp_buffer`/sidecar에 frame_wh 기록, 가중치 `<weights>.meta.json` 검증(불일치 시 fail-open), 학습 시 meta 자동 기록
 - [x] 전체 키포인트 추출 (RTX 4050 Laptop, 52만 프레임, 약 80분, 실패 0건): `python -m training.datasets.extract_keypoints --manifest dataset/_manifest/manifest_v1.jsonl --device 0`
 
+### 단계별 개선 실험 (progression_v1) ✅
+
+Day 5~6 항목 중 분할, 창 생성, 모델(Fall1DCNN-GAP, FallTCN, 고전 ML), 학습 하네스를 먼저 만들어
+"규칙만 → 1D CNN + URFD(원래 방식) → 데이터 추가 → 라벨/학습-운영 정렬 → 사건 구간 v2 + 모델 변경 → 임계값 조정"을
+같은 5-fold, 같은 이벤트 단위 프로토콜로 측정했습니다. 결과와 주의점은 [MODEL_STUDY.md](MODEL_STUDY.md).
+
+- 원래 방식(1D CNN + URFD)은 규칙만보다 나빴고(balanced 0.635 → 0.434), 데이터 추가가 가장 큰 개선(+0.248)
+- 사건 구간 v2(E)는 ADL 오탐을 0.174 → 0.05~0.065로 줄이는 대신 recall이 감소, balanced 차이는 fold 잡음 안
+- 다음 개선 후보: LEVEL1 시점의 최신 창(또는 진입 이후 최대 p_fall)으로 판정, onset 오프셋을 fold별로 추정,
+  시간 기준 탐지 지표를 실행기에 추가, 규칙 엔진 recall 상한(0.608) 개선
+
 ### Day 5: 라벨, 창, 분할과 데이터 분석 (CPU)
 
 - `training/windows.py`: 낙상 onset 기준 양성 창, ADL/onset 이전 음성 창, 룰 트리거 창 하드 네거티브 태깅

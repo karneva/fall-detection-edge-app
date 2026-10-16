@@ -266,6 +266,7 @@ python -m training.retrain_from_runs      # 현장 클립으로 액티브 러닝
 | [OPERATIONS](docs/OPERATIONS.md) | 실행, API, 저장 파일, 운영 점검 |
 | [ROADMAP](docs/ROADMAP.md) | 1D CNN 고도화 계획과 진행 상황 |
 | [DATASETS](docs/DATASETS.md) | 추가 학습 데이터 후보, 확보 순서, 라이선스 |
+| [MODEL_STUDY](docs/MODEL_STUDY.md) | 규칙만 → 1D CNN + URFD → 데이터 추가 → 모델 변경 단계별 개선 수치 (5-fold) |
 
 <details>
 <summary>Observation 데이터 구조 (프레임마다 엔진에 들어가는 입력)</summary>
