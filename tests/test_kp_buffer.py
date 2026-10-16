@@ -1,8 +1,11 @@
+import importlib.util
 import unittest
 
-from app.core.kp_buffer import TimedKeypointBuffer, kps_to_frame, window_summary
+from app.core.kp_buffer import TimedKeypointBuffer, frame_wh_from_track, kps_to_frame, window_summary
 from app.core.level1 import Level1Engine, Level1Params
-from app.eval.synth import CountingVerifier, make_obs, make_scenario
+from app.eval.synth import FRAME_H, FRAME_W, CountingVerifier, make_obs, make_scenario
+
+_HAS_NUMPY = importlib.util.find_spec("numpy") is not None
 
 
 def params(**kw):
@@ -39,6 +42,42 @@ class BufferTest(unittest.TestCase):
         self.assertTrue(b.window(99.0, 100.5)["truncated"])
         self.assertNotIn("kps", window_summary(w))
 
+    def test_frame_wh_last_non_none_in_window(self):
+        b = TimedKeypointBuffer(horizon_s=10.0)
+        b.append(0.0, None, frame_wh=(320, 240))
+        b.append(1.0, None)
+        b.append(2.0, None, frame_wh=[640, 480])
+        b.append(3.0, None)
+        self.assertEqual(b.window(0.0, 3.0)["frame_wh"], [640, 480])
+        self.assertEqual(b.window(0.0, 1.5)["frame_wh"], [320, 240])
+        self.assertIsNone(b.window(2.5, 3.0)["frame_wh"])
+        self.assertNotIn("frame_wh", window_summary(b.window(0.0, 3.0)))
+
+    def test_append_frame_wh_never_raises(self):
+        # 프레임 루프에서 호출되므로 잘못된 해상도 값은 무시(None)하고 예외를 내지 않음
+        b = TimedKeypointBuffer(horizon_s=10.0)
+        for i, bad in enumerate(((0, 480), (640,), "x", (None, 480), (-1, -1), {})):
+            b.append(float(i), None, frame_wh=bad)
+        self.assertIsNone(b.window(0.0, 10.0)["frame_wh"])
+        b.append(10.0, None, frame_wh=(640.0, 480.0))
+        self.assertEqual(b.window(0.0, 10.0)["frame_wh"], [640, 480])
+
+    @unittest.skipUnless(_HAS_NUMPY, "numpy 필요")
+    def test_append_frame_wh_numpy(self):
+        import numpy as np
+
+        b = TimedKeypointBuffer(horizon_s=10.0)
+        b.append(0.0, None, frame_wh=np.array([1280, 720], dtype=np.int32))
+        wh = b.window(0.0, 1.0)["frame_wh"]
+        self.assertEqual(wh, [1280, 720])
+        self.assertIs(type(wh[0]), int)  # json 직렬화 가능
+
+    def test_frame_wh_from_track(self):
+        self.assertEqual(frame_wh_from_track({"frame_shape": (480, 640)}), (640, 480))
+        self.assertEqual(frame_wh_from_track({"frame_shape": [720, 1280, 3]}), (1280, 720))
+        for bad in (None, {}, {"frame_shape": None}, {"frame_shape": (0, 640)}, {"frame_shape": "x"}, "track"):
+            self.assertIsNone(frame_wh_from_track(bad), bad)
+
     def test_time_going_backwards_clears(self):
         b = TimedKeypointBuffer()
         b.append(10.0, None)
@@ -68,6 +107,24 @@ class EngineEventWindowTest(unittest.TestCase):
             self.assertEqual(len(snap["event_window"]["kps"]), summ["n_frames"])
             self.assertEqual(len(snap["ai_input"]["kps"]), 30)
             self.assertEqual(snap["ai"]["decision"], "fall")
+
+    def test_event_window_has_frame_wh_from_obs(self):
+        obs, _ = make_scenario("fast_fall", lie_s=20.0)
+        engine = Level1Engine(params(), verifier=CountingVerifier(0.9))
+        ev = self.run_until(obs, engine)
+        # 이벤트 요약에는 넣지 않고(골든 trace 유지) 전체 구간(sidecar)에만 들어감
+        self.assertNotIn("frame_wh", ev["values"]["event_window"])
+        snap = engine.get_incident_snapshot()
+        self.assertEqual(snap["event_window"]["frame_wh"], [FRAME_W, FRAME_H])
+
+    def test_event_window_frame_wh_none_without_frame_shape(self):
+        obs, _ = make_scenario("fast_fall", lie_s=20.0)
+        for o in obs:
+            for t in o["tracks"]:
+                t.pop("frame_shape", None)
+        engine = Level1Engine(params(), verifier=CountingVerifier(0.9))
+        self.assertIsNotNone(self.run_until(obs, engine))
+        self.assertIsNone(engine.get_incident_snapshot()["event_window"]["frame_wh"])
 
     def test_escalated_event_keeps_same_window(self):
         obs, truth = make_scenario("fast_fall", lie_s=90.0)

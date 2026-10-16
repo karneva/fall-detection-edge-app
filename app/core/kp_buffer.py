@@ -4,6 +4,7 @@
 - 프레임 수가 아니라 시간(horizon_s)으로 보관 범위를 정하므로 처리 FPS에 무관
 - 사람이 없거나 품질이 낮은 프레임도 missing으로 기록해 시간축을 보존
 - 사건 시점 기준 구간(예: ABNORMAL 진입 -1.5s ~ +2.5s)을 잘라내 학습/분석용으로 저장
+- 원본 해상도(frame_wh)도 함께 보관해 정규화 좌표를 등방성 픽셀로 되돌릴 수 있게 함 (features v2)
 """
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional, Tuple
@@ -11,6 +12,7 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 NUM_KPS = 17
 
 Frame = Optional[List[List[float]]]  # 17 x [x, y, conf] 또는 None(missing)
+FrameWH = Optional[Tuple[int, int]]  # (width, height) 픽셀, 모르면 None
 
 
 def kps_to_frame(kps_list: Optional[List[Dict[str, Any]]]) -> Frame:
@@ -25,10 +27,38 @@ def kps_to_frame(kps_list: Optional[List[Dict[str, Any]]]) -> Frame:
     return frame
 
 
+def frame_wh_from_track(track: Optional[Dict[str, Any]]) -> FrameWH:
+    """obs 트랙의 frame_shape (h, w[, c])를 (w, h)로 바꿉니다. 없거나 잘못된 값이면 None."""
+    if not isinstance(track, dict):
+        return None
+    shape = track.get("frame_shape")
+    try:
+        h, w = int(shape[0]), int(shape[1])
+    except (TypeError, ValueError, IndexError, KeyError):
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    return (w, h)
+
+
+def _normalize_wh(frame_wh: Any) -> FrameWH:
+    """(w, h)를 양의 정수 튜플로 정리합니다. numpy 배열도 허용하고, 잘못된 값은 None (프레임 루프에서 예외 금지)."""
+    if frame_wh is None:
+        return None
+    try:
+        w, h = int(frame_wh[0]), int(frame_wh[1])
+    except (TypeError, ValueError, IndexError, KeyError):
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    return (w, h)
+
+
 class TimedKeypointBuffer:
     def __init__(self, horizon_s: float = 20.0):
         self.horizon_s = float(horizon_s)
-        self._buf: Deque[Tuple[float, Frame, Optional[List[float]]]] = deque()
+        # (ts, frame, bbox, frame_wh)
+        self._buf: Deque[Tuple[float, Frame, Optional[List[float]], FrameWH]] = deque()
 
     def __len__(self) -> int:
         return len(self._buf)
@@ -36,18 +66,26 @@ class TimedKeypointBuffer:
     def clear(self):
         self._buf.clear()
 
-    def append(self, ts: float, frame: Frame, bbox: Optional[List[float]] = None):
+    def append(self, ts: float, frame: Frame, bbox: Optional[List[float]] = None, frame_wh: FrameWH = None):
         ts = float(ts)
         if self._buf and ts < self._buf[-1][0]:
             # 시간이 거꾸로 가면(리플레이 재시작 등) 이전 기록은 의미가 없음
             self._buf.clear()
-        self._buf.append((ts, frame, list(bbox) if bbox else None))
+        wh = _normalize_wh(frame_wh)
+        self._buf.append((ts, frame, list(bbox) if bbox else None, wh))
         while self._buf and ts - self._buf[0][0] > self.horizon_s:
             self._buf.popleft()
 
     def window(self, t_start: float, t_end: float) -> Dict[str, Any]:
-        """[t_start, t_end] 구간의 프레임을 반환합니다."""
-        picked = [(t, f, b) for t, f, b in self._buf if t_start <= t <= t_end]
+        """
+        [t_start, t_end] 구간의 프레임을 반환합니다.
+        frame_wh: 구간 안에서 마지막으로 기록된 원본 해상도 [w, h] (없으면 None)
+        """
+        picked = [(t, f, b) for t, f, b, _ in self._buf if t_start <= t <= t_end]
+        wh = None
+        for t, _, _, w in self._buf:
+            if t_start <= t <= t_end and w is not None:
+                wh = w
         n = len(picked)
         span = (picked[-1][0] - picked[0][0]) if n >= 2 else 0.0
         return {
@@ -61,6 +99,7 @@ class TimedKeypointBuffer:
             "ts": [t for t, _, _ in picked],
             "kps": [f for _, f, _ in picked],
             "bbox": [b for _, _, b in picked],
+            "frame_wh": list(wh) if wh is not None else None,
         }
 
 

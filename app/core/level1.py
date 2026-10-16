@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List, Tuple, Callable
 
-from .kp_buffer import TimedKeypointBuffer, kps_to_frame, window_summary
+from .kp_buffer import TimedKeypointBuffer, frame_wh_from_track, kps_to_frame, window_summary
 from .presence import PresenceEngine, PresenceParams  # 기존 import 경로(app.core.level1) 호환
 from ..config import (
     ABNORMAL_TIMEOUT_S,
@@ -478,7 +478,7 @@ class Level1Engine:
             is_lost = True
 
         if is_lost:
-            self.kp_buffer.append(ts, None)
+            self.kp_buffer.append(ts, None, frame_wh=frame_wh_from_track(tracks[0] if tracks else None))
             self._maybe_capture_event_window(ts)
             self.present_streak = 0
             self.enter_acc_s = 0.0
@@ -526,7 +526,8 @@ class Level1Engine:
                     curr_kp_flat[kid*2+1] = float(k.get("y", 0.0))
         self.kp_seq.append(curr_kp_flat)
         self.kp_ts.append(ts)
-        self.kp_buffer.append(ts, kps_to_frame(t0.get("keypoints_raw") or t0.get("keypoints")), bbox)
+        self.kp_buffer.append(ts, kps_to_frame(t0.get("keypoints_raw") or t0.get("keypoints")), bbox,
+                              frame_wh=frame_wh_from_track(t0))
 
         shoulder_vy, shoulder_drop = self._compute_shoulder_drop(ts, kps_list)
 
