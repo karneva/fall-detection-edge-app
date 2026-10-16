@@ -101,7 +101,7 @@ CNN이 실제 낙상 알람을 조용히 지우는 경로를 막았습니다. �
 - [x] 통합 manifest(`manifest.py`, `build_manifest.py`): OmniFall 구간 라벨 + URFD 프레임 라벨(`urfd_labels.py`) +
   Figshare 폴더 라벨, 2,726개 영상, 다시점/중복 영상 event_group 병합, URFD RGB 영역 crop
 - [x] `kp_buffer`/sidecar에 frame_wh 기록, 가중치 `<weights>.meta.json` 검증(불일치 시 fail-open), 학습 시 meta 자동 기록
-- [ ] [owner, GPU] 전체 키포인트 추출: `python -m training.datasets.extract_keypoints --manifest dataset/_manifest/manifest_v1.jsonl --device 0`
+- [x] 전체 키포인트 추출 (RTX 4050 Laptop, 52만 프레임, 약 80분, 실패 0건): `python -m training.datasets.extract_keypoints --manifest dataset/_manifest/manifest_v1.jsonl --device 0`
 
 ### Day 5: 라벨, 창, 분할과 데이터 분석 (CPU)
 
@@ -111,7 +111,8 @@ CNN이 실제 낙상 알람을 조용히 지우는 경로를 막았습니다. �
 - 고전 ML 비교군: 손으로 만든 시계열 특징 + LogReg/GBDT, 특징 중요도
 - Day 4 리뷰에서 넘어온 주의점: Figshare 클립은 약 1.9초라 4초 창에 못 미침(짧은 창 또는 제외 결정 필요),
   추출기는 운영의 품질 게이트(quality < 0.15, 대상 전환 후 1초 유예)를 적용하지 않음(Day 7 런타임 정렬 때 맞춤),
-  Le2i subject 값은 OmniFall 그대로라 교차 피험자 분할 전 확인 필요
+  Le2i subject 값은 OmniFall 그대로라 교차 피험자 분할 전 확인 필요,
+  MCFD 낙상 구간 26/184개는 관절 가시율 30% 미만(특히 4번 카메라)이라 가시율 기준 필터 필요
 
 ### Day 6: 모델 zoo와 학습 하네스
 
