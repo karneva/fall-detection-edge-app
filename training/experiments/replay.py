@@ -58,6 +58,7 @@ _TS_EPS = 1e-6
 __all__ = [
     "RUNTIME_HZ", "FREEZE_TAIL_S", "DEFAULT_T0", "TIMELY_PRE_S", "TIMELY_POST_S", "DEFAULT_KP_DIR",
     "study_params", "resample_indices", "clip_to_obs", "clip_end_s", "run_clip", "clip_outcome", "timing",
+    "fall_intervals",
     "summarize",
     "NullVerifier", "clip_path", "load_row_clip", "replay_rows",
 ]
@@ -296,6 +297,33 @@ def _num(v) -> Optional[float]:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
+def fall_intervals(row: Dict[str, Any]) -> List[Tuple[float, float]]:
+    """
+    낙상 클립의 낙상 구간 목록 (시작 순). 라벨 구간 중 cls == "fall"을 모두 쓰고 (MCFD는 한 클립에 낙상이 2번인 경우가
+    있음), 없으면 fall_start_s/fall_end_s. 낙상 클립이 아니거나 구간이 없으면 [].
+    """
+    if row.get("label") != "fall":
+        return []
+    out = []
+    for s in row.get("segments") or []:
+        a, b = _num(s.get("start_s")), _num(s.get("end_s"))
+        if s.get("cls") == "fall" and a is not None and b is not None:
+            out.append((a, b))
+    if not out:
+        fs, fe = _num(row.get("fall_start_s")), _num(row.get("fall_end_s"))
+        if fs is not None and fe is not None:
+            out.append((fs, fe))
+    return sorted(out)
+
+
+def _ref_fall(falls: Sequence[Tuple[float, float]], enter: float) -> Tuple[float, float]:
+    """제때가 아닌 이유를 정할 기준 낙상: 진입이 판정 창 안에 드는 구간, 없으면 시작이 진입과 가장 가까운 구간."""
+    for fs, fe in falls:
+        if fs - TIMELY_PRE_S <= enter <= fe + TIMELY_POST_S:
+            return fs, fe
+    return min(falls, key=lambda f: abs(f[0] - enter))
+
+
 def timing(row: Dict[str, Any], events: Sequence[Dict[str, Any]], t0: float = DEFAULT_T0,
            end_s: Optional[float] = None) -> Dict[str, Any]:
     """
@@ -303,17 +331,22 @@ def timing(row: Dict[str, Any], events: Sequence[Dict[str, Any]], t0: float = DE
 
     abnormal_s: ABNORMAL 진입 시각 목록, level1_s: 첫 level1 시각,
     level1_enter_s: 첫 level1을 낸 에피소드의 ABNORMAL 진입 시각 (level1 이전의 마지막 abnormal_enter),
-    in_tail: 첫 level1이 정지 꼬리 안 (end_s = 마지막 실제 프레임 시각을 줄 때만, 아니면 None).
-    낙상 클립(fall_start_s/fall_end_s가 있음)이고 level1이 있을 때만:
-      timely_strict: 진입이 [fall_start - 2, fall_end + 3] 안이고 level1이 fall_start 이후
-      timely_loose: 진입 또는 level1 중 하나가 그 창 안
+    in_tail: 첫 level1이 정지 꼬리 안 (end_s = 마지막 실제 프레임 시각을 줄 때만, 아니면 None),
+    has_interval: 낙상 클립이고 낙상 구간 라벨이 있음 (알람과 무관, summarize의 시간 기준 지표 계산 조건).
+    낙상 구간은 fall_intervals (한 클립에 여러 개일 수 있음). 낙상 구간이 있고 level1이 있을 때만:
+      timely_strict: 어느 낙상 구간에 대해 진입이 [fall_start - 2, fall_end + 3] 안이고 level1이 그 fall_start 이후
+      timely_loose: 어느 낙상 구간에 대해 진입 또는 level1 중 하나가 그 창 안
       untimely: 엄격 기준에서 제때가 아닌 이유 "level1_before_fall" | "enter_early" | "enter_late" (제때면 None)
-    그 밖에는 timely_* / untimely가 None.
+      ref_fall_s: 판정 기준 낙상 구간 [start, end] (진입이 창 안에 드는 구간, 없으면 시작이 가장 가까운 구간)
+    level1이 있는데 앞선 abnormal_enter가 없으면 제때가 아님(timely_* False, untimely "no_entry").
+    그 밖에는 timely_* / untimely / ref_fall_s가 None.
     """
     ab = [float(e["ts"]) - t0 for e in events if e.get("type") == "abnormal_enter" and _num(e.get("ts")) is not None]
     l1 = [e for e in events if e.get("type") == "level1" and _num(e.get("ts")) is not None]
+    falls = fall_intervals(row)
     out: Dict[str, Any] = {"abnormal_s": ab, "level1_s": None, "level1_enter_s": None, "in_tail": None,
-                           "timely_strict": None, "timely_loose": None, "untimely": None}
+                           "has_interval": bool(falls), "timely_strict": None, "timely_loose": None,
+                           "untimely": None, "ref_fall_s": None}
     if not l1:
         return out
     t1 = float(l1[0]["ts"]) - t0
@@ -323,14 +356,21 @@ def timing(row: Dict[str, Any], events: Sequence[Dict[str, Any]], t0: float = DE
     out["level1_enter_s"] = enter
     if end_s is not None:
         out["in_tail"] = bool(t1 > float(end_s) + 1e-6)
-    fs, fe = _num(row.get("fall_start_s")), _num(row.get("fall_end_s"))
-    if row.get("label") != "fall" or fs is None or fe is None or enter is None:
+    if not falls:
         return out
-    lo, hi = fs - TIMELY_PRE_S, fe + TIMELY_POST_S
-    enter_in = lo <= enter <= hi
-    out["timely_strict"] = bool(enter_in and t1 >= fs)
-    out["timely_loose"] = bool(enter_in or lo <= t1 <= hi)
+    if enter is None:
+        out.update(timely_strict=False, timely_loose=False, untimely="no_entry")
+        return out
+
+    def win(f):
+        return f[0] - TIMELY_PRE_S, f[1] + TIMELY_POST_S
+
+    out["timely_strict"] = any(win(f)[0] <= enter <= win(f)[1] and t1 >= f[0] for f in falls)
+    out["timely_loose"] = any(win(f)[0] <= enter <= win(f)[1] or win(f)[0] <= t1 <= win(f)[1] for f in falls)
+    fs, fe = _ref_fall(falls, enter)
+    out["ref_fall_s"] = [fs, fe]
     if not out["timely_strict"]:
+        lo = fs - TIMELY_PRE_S
         out["untimely"] = ("level1_before_fall" if t1 < fs else "enter_early" if enter < lo else "enter_late")
     return out
 
@@ -391,10 +431,9 @@ def _stats(outcomes: List[Dict[str, Any]]) -> Dict[str, Any]:
     spec = None if fa_rate is None else 1.0 - fa_rate
     precision = _ratio(n_det, n_det + n_fa)
     # 시간 기준 탐지: 낙상 클립 모두에 timely 판정이 있을 때만 (옛 결과 파일이나 라벨 구간이 없는 낙상이면 None)
-    timed = n_fall > 0 and all(("timely_strict" in o) and (o["timely_strict"] is not None or not o["alarm"])
-                               for o in falls)
-    n_timely = sum(1 for o in falls if o.get("timely_strict")) if timed else None
-    n_timely_loose = sum(1 for o in falls if o.get("timely_loose")) if timed else None
+    timed = n_fall > 0 and all(o.get("has_interval") for o in falls)
+    n_timely = sum(1 for o in falls if o.get("timely_strict") is True) if timed else None
+    n_timely_loose = sum(1 for o in falls if o.get("timely_loose") is True) if timed else None
     timely_recall = _ratio(n_timely, n_fall) if timed else None
     return {
         "n_fall": n_fall,

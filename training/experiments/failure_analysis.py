@@ -5,9 +5,13 @@
 프레임마다 엔진 내부 상태(누적 타이머, 진입 신호, 사람 검출 여부)를 기록하고, 라벨 구간과 비교해 원인을 정합니다.
 
 원인 묶음 (group)
-  pose : 포즈 검출 때문에 규칙이 판단할 입력이 없음 (사람 미검출·품질 미달, 검출이 끊겨 워밍업이 반복)
-  rule : 입력은 있었지만 규칙 조건을 넘지 못함 (진입 신호 부족, 짧은 신호, bbox 비율, 부분 신체, 붕괴 미확정)
-  label: 라벨상 일어남 등 규칙 설계상 알람이 없어야 맞는 경우, 라벨 구간이 클립 밖
+  pose  : 포즈 검출 때문에 규칙이 판단할 입력이 없음. 세부 묶음(subgroup)으로 나눔:
+          no_detection = 운영 임계값(conf 0.5, 품질 0.15)에서 사람 미검출,
+          engine_lost_handling = 검출이 간헐적이라 엔진의 미검출 처리(워밍업 리셋, 미검출 중 판정 정지)에 걸림
+  rule  : 입력은 있었지만 규칙 조건을 넘지 못함 (진입 신호 부족, 짧은 신호, bbox 비율, 부분 신체, 붕괴 미확정)
+  label : 라벨상 일어남 등 규칙 설계상 알람이 없어야 맞는 경우, 라벨 구간이 클립 밖, 라벨이 끝난 뒤 해제
+  replay: 재생 방식 때문에 생긴 경우 (마지막 실제 프레임만 미검출이라 정지 꼬리 20초 동안 판정이 멈춤)
+낙상이 여러 번인 클립(MCFD)의 놓친 낙상은 첫 낙상 구간 기준으로 봅니다.
 자동 분류는 신뢰도가 높지만 골격이 틀린 경우("자신 있게 틀린" 포즈)를 rule로 셉니다. 무작위 표본을 영상에 겹쳐
 직접 확인해 보정합니다 (render_sheet).
 
@@ -44,11 +48,17 @@ PARTIAL_FRAC_TH = 0.5
 END_POSE_S = 1.0
 # 낙상 후 일어남으로 보는 라벨 클래스
 GETUP_CLASSES = ("stand_up", "standing", "walk")
+# 회복 해제 시각과 일어남 라벨 구간을 맞춰 볼 때의 여유 (MCFD 카메라별 라벨 시각 차이 흡수)
+GETUP_TOL_S = 1.0
+# 진입 후 실제 프레임에서 사람이 이 시간 이상 연속으로 사라져야 lost_after_fall (마지막 프레임 하나만 없는 경우와 구분)
+LOST_RUN_S = 1.0
 
 CAUSE_GROUP = {
     "pose_lost_during_fall": "pose",
     "detection_flicker": "pose",
     "lost_after_fall": "pose",
+    "tail_last_frame_lost": "replay",
+    "unlabeled_exit": "label",
     "partial_body": "rule",
     "signals_too_brief": "rule",
     "lying_bbox_not_flat": "rule",
@@ -60,10 +70,19 @@ CAUSE_GROUP = {
     "label_outside_clip": "label",
 }
 
+# pose 묶음의 세부 묶음
+POSE_SUBGROUP = {
+    "pose_lost_during_fall": "no_detection",
+    "detection_flicker": "engine_lost_handling",
+    "lost_after_fall": "engine_lost_handling",
+}
+
 CAUSE_DESC = {
-    "pose_lost_during_fall": "낙상 구간 프레임의 절반 이상에서 사람 미검출 또는 품질 미달",
+    "pose_lost_during_fall": "낙상 구간 프레임의 절반 이상에서 사람 미검출 또는 품질 미달 (운영 임계값 conf 0.5 기준)",
     "detection_flicker": "검출이 끊겼다 이어져 워밍업(12프레임)이 반복, 진입 판정을 못 함",
-    "lost_after_fall": "ABNORMAL 진입 후 사람이 사라져(마지막 프레임 미검출) 정지 누적·타임아웃이 진행되지 않음",
+    "lost_after_fall": "ABNORMAL 진입 후 실제 영상에서 사람이 1초 이상 사라진 채 끝나 정지 누적·타임아웃이 진행되지 않음",
+    "tail_last_frame_lost": "진입 후 사람이 대부분 보였지만 마지막 실제 프레임만 미검출이라 정지 꼬리 동안 판정이 멈춤 (재생 방식)",
+    "unlabeled_exit": "회복 해제가 라벨 구간이 끝난 뒤라 일어났는지 라벨로 알 수 없음",
     "partial_body": "화면 가장자리/하단에 걸린 부분 신체로 판정되어 진입 조건이 달라짐",
     "signals_too_brief": "진입 신호 2개 이상이 잠깐 있었지만 0.35초 연속을 못 채움",
     "lying_bbox_not_flat": "누운 뒤에도 정규화 bbox 세로/가로 비율이 자세 임계값(1.6) 이상",
@@ -77,7 +96,7 @@ CAUSE_DESC = {
 
 __all__ = [
     "EVAL_DATASETS", "CAUSE_GROUP", "CAUSE_DESC",
-    "trace_clip", "episodes", "segment_class_at", "classify_missed", "classify_entry_window",
+    "POSE_SUBGROUP", "trace_clip", "episodes", "segment_class_at", "classify_missed", "classify_entry_window",
     "classify_untimely", "classify_adl_alarm", "analyze_clip", "summarize_records", "render_markdown",
     "render_sheet", "main",
 ]
@@ -253,37 +272,84 @@ def classify_entry_window(frames: Sequence[Dict[str, Any]], lo: float, hi: float
     return "weak_motion_signals", st
 
 
-def _got_up_after(row: Dict[str, Any], t: float) -> bool:
-    return any(s["cls"] in GETUP_CLASSES and float(s["end_s"]) > t for s in (row.get("segments") or []))
+def _label_end(row: Dict[str, Any]) -> Optional[float]:
+    segs = row.get("segments") or []
+    return max((float(s["end_s"]) for s in segs), default=None)
+
+
+def _got_up_near(row: Dict[str, Any], enter_s: float, exit_s: float, recover_s: float,
+                 tol: float = GETUP_TOL_S) -> bool:
+    """
+    회복 해제(exit_s) 무렵에 라벨상 일어나는 중이었는지: 일어남 클래스 구간이 해제 시각 + tol 이전에 시작하고
+    max(진입, 해제 - 회복 판정 시간) 이후에 끝나며, 그 구간과 해제 사이에 새 낙상이 시작하지 않음.
+    """
+    segs = sorted(row.get("segments") or [], key=lambda s: float(s["start_s"]))
+    lo = max(enter_s, exit_s - recover_s)
+    for s in segs:
+        a, b = float(s["start_s"]), float(s["end_s"])
+        if s["cls"] in GETUP_CLASSES and a <= exit_s + tol and b >= lo - tol:
+            if not any(x["cls"] == "fall" and a < float(x["start_s"]) <= exit_s for x in segs):
+                return True
+    return False
+
+
+def _trailing_lost_s(frames: Sequence[Dict[str, Any]]) -> float:
+    """실제 프레임(정지 꼬리 제외) 끝에서 연속으로 미검출인 시간 (초)."""
+    main = [f for f in frames if not f["tail"]]
+    if not main or not main[-1]["lost"]:
+        return 0.0
+    k = len(main) - 1
+    while k > 0 and main[k - 1]["lost"]:
+        k -= 1
+    first_lost = main[k]["t"]
+    prev_seen = main[k - 1]["t"] if k > 0 else first_lost
+    return main[-1]["t"] - prev_seen
 
 
 def classify_missed(row: Dict[str, Any], events, frames, params, t0: float = R.DEFAULT_T0) -> Dict[str, Any]:
-    """놓친 낙상(level1 없음) 하나의 원인."""
-    fs, fe = float(row["fall_start_s"]), float(row["fall_end_s"])
-    lo = fs - R.TIMELY_PRE_S
+    """
+    놓친 낙상(level1 없음) 하나의 원인. 낙상이 여러 번이면 첫 낙상 구간 기준.
+    관련 에피소드: 진입이 [fall_start - 2, fall_end + 3] 안이거나, 그 전에 진입해 fall_start에 아직 이어지던 것.
+    여러 개면 낙상과 겹치는 첫 에피소드. 없으면 낙상 구간 동안 진입하지 못한 이유(classify_entry_window).
+    """
+    falls = R.fall_intervals(row)
+    fs, fe = falls[0] if falls else (float(row["fall_start_s"]), float(row["fall_end_s"]))
+    lo, hi = fs - R.TIMELY_PRE_S, fe + R.TIMELY_POST_S
     eps = episodes(events, t0)
-    # 낙상과 관련된 에피소드: 낙상 창 이후에 시작했거나, 낙상 시작 시점에 아직 이어지던 것
-    rel = [e for e in eps if e["enter_s"] >= lo or e["end_s"] is None or e["end_s"] >= fs]
-    out: Dict[str, Any] = {"n_episodes": len(eps), "entered": bool(rel)}
+    rel = [e for e in eps if (lo <= e["enter_s"] <= hi)
+           or (e["enter_s"] < lo and (e["end_s"] is None or e["end_s"] >= fs))]
+    out: Dict[str, Any] = {"n_episodes": len(eps), "entered": bool(rel), "fall_s": [fs, fe]}
     if not rel:
         cause, st = classify_entry_window(frames, fs, fe + FALL_POST_S, params)
         out.update(cause=cause, stats=st)
         return out
-    ep = rel[-1]
+    ep = rel[0]
     out["episode"] = ep
-    after = [f for f in frames if f["t"] >= ep["enter_s"]]
+    real_after = [f for f in frames if f["t"] >= ep["enter_s"] and not f["tail"]]
     if ep["end"] == "recovered":
-        cause = "got_up_per_label" if _got_up_after(row, fe) else "false_recovery"
-        out.update(cause=cause, stats={"exit_s": ep["end_s"]})
+        exit_s = float(ep["end_s"])
+        lab_end = _label_end(row)
+        if _got_up_near(row, ep["enter_s"], exit_s, params.recover_s):
+            cause = "got_up_per_label"
+        elif lab_end is not None and exit_s > lab_end + GETUP_TOL_S:
+            cause = "unlabeled_exit"
+        else:
+            cause = "false_recovery"
+        out.update(cause=cause, stats={"exit_s": exit_s, "label_end_s": lab_end})
         return out
     last = frames[-1] if frames else None
+    trailing = _trailing_lost_s(frames)
     out["stats"] = {
-        "lost_frac_after": _frac(after, lambda f: f["lost"]),
+        "lost_frac_after": _frac(real_after, lambda f: f["lost"]),
+        "trailing_lost_s": trailing,
         "confirmed": bool(last and last["confirmed"]),
-        "max_still_acc": max((f["still_acc"] for f in after), default=0.0),
+        "max_still_acc": max((f["still_acc"] for f in real_after), default=0.0),
     }
     if last is not None and last["lost"]:
-        out["cause"] = "lost_after_fall"
+        if trailing >= LOST_RUN_S or out["stats"]["lost_frac_after"] >= LOST_FRAC_TH:
+            out["cause"] = "lost_after_fall"
+        else:
+            out["cause"] = "tail_last_frame_lost"
     elif last is not None and not last["confirmed"]:
         out["cause"] = "timeout_unconfirmed"
     else:
@@ -302,9 +368,10 @@ def classify_untimely(row: Dict[str, Any], outcome: Dict[str, Any], events, fram
         "enter_reason": _reason_kind(eps[0]["reason"] if eps else None),
         "class_at_enter": segment_class_at(row, enter),
     }
+    ref = outcome.get("ref_fall_s") or [float(row["fall_start_s"]), float(row["fall_end_s"])]
+    out["ref_fall_s"] = ref
     if outcome.get("untimely") == "enter_late":
-        cause, st = classify_entry_window(frames, float(row["fall_start_s"]),
-                                          float(row["fall_end_s"]) + FALL_POST_S, params)
+        cause, st = classify_entry_window(frames, float(ref[0]), float(ref[1]) + FALL_POST_S, params)
         out.update(cause=cause, stats=st)
     return out
 
@@ -345,7 +412,8 @@ def analyze_clip(row: Dict[str, Any], clip: Dict[str, Any], params) -> Dict[str,
         "clip_id": row["clip_id"], "dataset": row["dataset"], "label": row["label"],
         "cam": row.get("cam"), "frame_wh": [int(v) for v in clip.get("frame_wh", [0, 0])],
         "outcome": {k: outcome[k] for k in ("alarm", "reasons", "n_abnormal", "level1_s", "level1_enter_s",
-                                            "in_tail", "timely_strict", "timely_loose", "untimely")},
+                                            "in_tail", "timely_strict", "timely_loose", "untimely", "ref_fall_s")},
+        "presence": presence_around_fall(row, clip, params.min_quality),
         "clip_end_s": R.clip_end_s(obs),
         "fall_start_s": row.get("fall_start_s"), "fall_end_s": row.get("fall_end_s"),
         "kind": None, "analysis": None,
@@ -366,7 +434,31 @@ def analyze_clip(row: Dict[str, Any], clip: Dict[str, Any], params) -> Dict[str,
         rec["kind"] = "adl_ok"
     if rec["kind"] in ("missed", "untimely") and rec["analysis"].get("cause"):
         rec["analysis"]["group"] = CAUSE_GROUP.get(rec["analysis"]["cause"], "rule")
+        rec["analysis"]["subgroup"] = POSE_SUBGROUP.get(rec["analysis"]["cause"])
     return rec
+
+
+PRESENCE_PRE_S = 3.0
+
+
+def presence_around_fall(row: Dict[str, Any], clip: Dict[str, Any], min_quality: float) -> Optional[Dict[str, Any]]:
+    """
+    첫 낙상 전 3초와 fall_end 이후(클립 끝까지)의 사람 검출률 (원본 프레임, 사람 선택 + 관절 conf 평균 >= min_quality).
+    낙상 클립이 아니면 None. 구간에 프레임이 없으면 그 값은 None.
+    """
+    falls = R.fall_intervals(row)
+    if not falls:
+        return None
+    import numpy as np
+    fs, fe = falls[0]
+    ts = np.asarray(clip["ts"], dtype=np.float64)
+    ok = np.asarray(clip["present"], dtype=bool) & (
+        np.asarray(clip["kps"], dtype=np.float64)[:, :, 2].mean(axis=1) >= float(min_quality))
+
+    def rate(lo, hi):
+        m = (ts >= lo) & (ts <= hi)
+        return float(ok[m].mean()) if m.any() else None
+    return {"before": rate(fs - PRESENCE_PRE_S, fs), "after": rate(fe, float(ts[-1]) if len(ts) else fe)}
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +486,9 @@ def summarize_records(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "n_adl": sum(1 for r in records if r["label"] == "adl"),
         "missed_cause": by(missed, lambda r: r["analysis"]["cause"]),
         "missed_group": by(missed, lambda r: r["analysis"]["group"]),
+        "missed_pose_subgroup": by([r for r in missed if r["analysis"]["group"] == "pose"],
+                                   lambda r: r["analysis"]["subgroup"]),
+        "presence": _presence_table(records),
         "missed_entered": by(missed, lambda r: "entered" if r["analysis"]["entered"] else "never_entered"),
         "missed_by_dataset": missed_by_ds,
         "falls_by_dataset": falls_by_ds,
@@ -410,6 +505,24 @@ def summarize_records(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "adl_in_tail": by(adl, lambda r: r["analysis"]["in_tail"]),
         "adl_lying_classes": sum(1 for r in adl if {"lying", "lie_down"} & set(r["analysis"]["classes"])),
     }
+
+
+def _presence_table(records: Sequence[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """데이터셋 x 결과 종류(낙상 클립)별 낙상 전/후 사람 검출률 평균과 클립 수."""
+    acc: Dict[str, Dict[str, List[float]]] = collections.defaultdict(lambda: {"before": [], "after": []})
+    for r in records:
+        pr = r.get("presence")
+        if r["label"] != "fall" or not pr:
+            continue
+        for key in (f"{r['dataset']}:{r['kind']}", f"ALL:{r['kind']}", r["dataset"], "ALL"):
+            for side in ("before", "after"):
+                if pr.get(side) is not None:
+                    acc[key][side].append(pr[side])
+    out = {}
+    for key, v in sorted(acc.items()):
+        out[key] = {side: (sum(x) / len(x) if x else None) for side, x in v.items()}
+        out[key]["n"] = max(len(v["before"]), len(v["after"]))
+    return out
 
 
 def _table(counter: Dict[Any, int], total: Optional[int] = None, desc: Optional[Dict[str, str]] = None,
@@ -434,6 +547,7 @@ def render_markdown(summary: Dict[str, Any]) -> str:
     out.append(f"\n### 놓친 낙상 {n_missed}개: 원인 묶음\n")
     out.append(_table(s["missed_group"], n_missed, head=("묶음", "개수")))
     out.append(f"\n진입 여부: {s['missed_entered']}\n")
+    out.append("pose 세부 묶음: " + ", ".join(f"{k} {v}" for k, v in s["missed_pose_subgroup"].items()) + "\n")
     out.append("\n### 놓친 낙상: 세부 원인\n")
     out.append(_table(s["missed_cause"], n_missed, CAUSE_DESC, head=("원인", "개수")))
     out.append("\n### 놓친 낙상: 데이터셋별 원인\n")
@@ -445,6 +559,13 @@ def render_markdown(summary: Dict[str, Any]) -> str:
                    + " | ".join(str(c.get(k, 0)) for k in causes) + " |")
     out.append("\n### 놓친 낙상: 영상 크기별\n")
     out.append(_table(s["missed_by_frame"], n_missed, head=("WxH", "개수")))
+    out.append("\n### 낙상 전 3초 / fall_end 이후 사람 검출률 (평균)\n")
+    out.append("| 데이터셋:결과 | 클립 | 전 | 후 |")
+    out.append("| --- | --- | --- | --- |")
+    for k, v in s["presence"].items():
+        def f(x):
+            return "-" if x is None else f"{x:.2f}"
+        out.append(f"| {k} | {v['n']} | {f(v['before'])} | {f(v['after'])} |")
     n_unt = sum(s["untimely_type"].values())
     out.append(f"\n### 제때 아닌 탐지 {n_unt}개\n")
     out.append(_table(s["untimely_type"], n_unt, head=("유형", "개수")))

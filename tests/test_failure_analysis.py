@@ -125,6 +125,61 @@ class FailureAnalysisTest(unittest.TestCase):
         self.assertIn("pose_lost_during_fall", md)
         self.assertTrue(set(FA.CAUSE_GROUP) <= set(FA.CAUSE_DESC))
 
+    def _frames(self, n, dt=0.1, **kw):
+        base = {"tail": False, "lost": False, "state": "NORMAL", "streak": 30, "aspect": 3.0, "partial": False,
+                "hits": {"drop": False, "posture": False, "shoulder": False, "height": False}, "n_hits": 0,
+                "enter_acc": 0.0, "low_cnt": 0, "still_acc": 0.0, "confirmed": False, "recover_acc": 0.0}
+        return [dict(base, t=i * dt, **kw) for i in range(n)]
+
+    ROW = {"clip_id": "d/f", "dataset": "d", "label": "fall", "fall_start_s": 2.0, "fall_end_s": 3.0,
+           "segments": [{"cls": "walk", "start_s": 0.0, "end_s": 2.0}, {"cls": "fall", "start_s": 2.0, "end_s": 3.0},
+                        {"cls": "fallen", "start_s": 3.0, "end_s": 6.0}, {"cls": "stand_up", "start_s": 6.0,
+                                                                          "end_s": 8.0}]}
+
+    def test_later_episode_is_not_the_fall_episode(self):
+        """낙상 창(fall_end + 3초) 뒤에 시작한 에피소드는 관련 에피소드가 아님 -> 진입 창 원인"""
+        frames = self._frames(100)
+        ev = [{"type": "abnormal_enter", "ts": 1000.0 + 7.0}, {"type": "abnormal_exit", "ts": 1000.0 + 8.0}]
+        out = FA.classify_missed(self.ROW, ev, frames, self.p)
+        self.assertFalse(out["entered"])
+        self.assertNotIn(out["cause"], ("got_up_per_label", "false_recovery"))
+
+    def test_got_up_tied_to_exit(self):
+        frames = self._frames(100)
+        up = [{"type": "abnormal_enter", "ts": 1002.2}, {"type": "abnormal_exit", "ts": 1007.0}]
+        self.assertEqual(FA.classify_missed(self.ROW, up, frames, self.p)["cause"], "got_up_per_label")
+        # 누워 있는 동안(일어남 라벨보다 한참 전) 해제 -> 잘못된 회복
+        early = [{"type": "abnormal_enter", "ts": 1002.2}, {"type": "abnormal_exit", "ts": 1003.5}]
+        self.assertEqual(FA.classify_missed(self.ROW, early, frames, self.p)["cause"], "false_recovery")
+        # 라벨이 끝난 뒤 해제 -> 라벨로 알 수 없음
+        row = dict(self.ROW, segments=self.ROW["segments"][:3])
+        after = [{"type": "abnormal_enter", "ts": 1002.2}, {"type": "abnormal_exit", "ts": 1009.0}]
+        self.assertEqual(FA.classify_missed(row, after, self._frames(120), self.p)["cause"], "unlabeled_exit")
+
+    def test_last_frame_lost_vs_lost_after_fall(self):
+        ev = [{"type": "abnormal_enter", "ts": 1002.2}]
+        frames = self._frames(60)                       # 실제 프레임 0~5.9초
+        frames[-1]["lost"] = True                       # 마지막 실제 프레임만 미검출
+        frames += [dict(frames[-1], t=6.0 + 0.1 * i, tail=True) for i in range(30)]
+        out = FA.classify_missed(self.ROW, ev, frames, self.p)
+        self.assertEqual((out["cause"], FA.CAUSE_GROUP[out["cause"]]), ("tail_last_frame_lost", "replay"))
+        frames2 = self._frames(60)
+        for f in frames2[40:]:
+            f["lost"] = True                            # 마지막 2초 미검출
+        frames2 += [dict(frames2[-1], t=6.0 + 0.1 * i, tail=True) for i in range(30)]
+        out2 = FA.classify_missed(self.ROW, ev, frames2, self.p)
+        self.assertEqual(out2["cause"], "lost_after_fall")
+        self.assertGreaterEqual(out2["stats"]["trailing_lost_s"], 1.0)
+
+    def test_presence_around_fall(self):
+        row, clip = _clip()
+        pr = FA.presence_around_fall(row, clip, self.p.min_quality)
+        self.assertAlmostEqual(pr["before"], 1.0)
+        fs = row["fall_start_s"]
+        pr2 = FA.presence_around_fall(row, _blank(clip, fs + 1.0, 1e9), self.p.min_quality)
+        self.assertEqual(pr2["after"], 0.0)
+        self.assertIsNone(FA.presence_around_fall({"label": "adl"}, clip, 0.15))
+
     def test_sheet_times_clamped(self):
         rec = {"label": "fall", "fall_start_s": 0.5, "fall_end_s": 1.5, "clip_end_s": 2.0, "outcome": {}}
         ts = [t for _, t in FA.sheet_times(rec)]

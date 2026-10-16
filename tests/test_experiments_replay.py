@@ -394,6 +394,34 @@ class TimingTest(unittest.TestCase):
         self.assertIsNone(miss["level1_s"])
         self.assertIsNone(miss["timely_strict"])
 
+    def test_multiple_falls(self):
+        """낙상이 두 번인 클립: 두 번째 낙상에 대한 알람도 제때, 기준 낙상은 진입이 창 안에 드는 구간"""
+        row = dict(self.ROW, segments=[{"cls": "walk", "start_s": 0.0, "end_s": 5.0},
+                                       {"cls": "fall", "start_s": 5.0, "end_s": 6.0},
+                                       {"cls": "stand_up", "start_s": 8.0, "end_s": 10.0},
+                                       {"cls": "fall", "start_s": 20.0, "end_s": 21.0}])
+        self.assertEqual(replay.fall_intervals(row), [(5.0, 6.0), (20.0, 21.0)])
+        t = replay.timing(row, self._ev(19.5, 30.0))
+        self.assertTrue(t["timely_strict"])
+        self.assertEqual(t["ref_fall_s"], [20.0, 21.0])
+        late = replay.timing(row, self._ev(26.0, 36.0))
+        self.assertEqual((late["timely_strict"], late["untimely"], late["ref_fall_s"]), (False, "enter_late", [20.0, 21.0]))
+        # 구간 라벨이 없으면 fall_start_s/fall_end_s
+        self.assertEqual(replay.fall_intervals(self.ROW), [(5.0, 6.0)])
+        self.assertEqual(replay.fall_intervals({"label": "adl", "segments": row["segments"]}), [])
+
+    def test_level1_without_entry_is_not_timely(self):
+        t = replay.timing(self.ROW, [{"type": "level1", "ts": 1010.0}])
+        self.assertEqual((t["timely_strict"], t["untimely"]), (False, "no_entry"))
+
+    def test_timed_gate_does_not_depend_on_alarms(self):
+        """구간 라벨이 없는 낙상이 하나라도 있으면 알람 여부와 관계없이 시간 기준 지표는 None"""
+        unlabeled = {"clip_id": "d/u", "dataset": "d", "label": "fall"}
+        for ev in ([], self._ev(1.0, 11.0)):
+            outs = [replay.clip_outcome(self.ROW, self._ev(4.0, 14.0)), replay.clip_outcome(unlabeled, ev)]
+            self.assertFalse(outs[1]["has_interval"])
+            self.assertIsNone(replay.summarize(outs)["timely_recall"])
+
     def test_summarize_timely(self):
         def o(row, events):
             return replay.clip_outcome(row, events)
