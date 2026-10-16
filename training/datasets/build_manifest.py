@@ -162,7 +162,8 @@ def build_omnifall(name: str, dataset_root: Path, repo_root: Path) -> tuple:
         group = f"{name}/{path.split('/')[0]}" if name == "mcfd" else None
         rows.append(make_row(name, path, rel_video(video, repo_root), c["segments"], "omnifall",
                              f"{_license(name)}; labels: OmniFall {OMNIFALL_LABEL_LICENSE}",
-                             subject=c["subject"], cam=c["cam"], event_group=group))
+                             subject=c["subject"], cam=c["cam"], event_group=group,
+                             fps=FPS_OVERRIDE.get(name)))
     unlabeled = [v.relative_to(video_root).as_posix() for v in all_videos - used]
     stat.update({
         "label_paths": len(clips),
@@ -174,6 +175,11 @@ def build_omnifall(name: str, dataset_root: Path, repo_root: Path) -> tuple:
     })
     return rows, stat
 
+
+# 컨테이너 헤더 fps가 실제 촬영 fps와 다른 데이터셋 (라벨 시각의 기준 fps)
+# MCFD avi는 모두 120fps로 기록되어 있지만 실제는 30fps: OmniFall 구간 끝이 프레임수/30과 일치하고,
+# 30fps로 보면 보행 속도와 낙상 시점이 라벨과 맞음 (120fps로 보면 모든 낙상 라벨이 클립 끝을 넘어감)
+FPS_OVERRIDE = {"mcfd": 30.0}
 
 # URFD cam0 mp4는 640x240 합성 영상: 왼쪽 절반은 깊이 영상, 오른쪽 절반이 RGB.
 # 깊이 영상에서 사람이 검출되면 키포인트가 오염되므로 RGB 절반만 사용

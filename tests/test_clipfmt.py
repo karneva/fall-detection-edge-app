@@ -399,6 +399,25 @@ class RunExtractionTest(unittest.TestCase):
         log = {r["clip_id"]: r for r in self.read_log()}
         self.assertIn("crop_px", log["ds/a"]["error"])
 
+    def test_manifest_fps_overrides_container_header(self):
+        # MCFD처럼 헤더 fps(25)가 실제(30)와 다르면 manifest fps를 사용
+        self.rows = [dict(self.rows[0], fps=30.0, segments=[{"cls": "fall", "start_s": 0.05, "end_s": 0.15}])]
+        self.run_once()
+        c = load_clip(self.out / "ds" / "a.npz")
+        self.assertEqual((c["meta"]["native_fps"], c["meta"]["fps_source"], c["meta"]["container_fps"]),
+                         (30.0, "manifest", 25.0))
+        np.testing.assert_allclose(c["ts"][1], 1 / 30.0)
+
+    def test_label_timebase_mismatch_fails_clip(self):
+        # 6프레임 @25fps = 0.24초인데 라벨이 3초에 끝나면 시간축 오류 -> 이 클립만 실패
+        self.rows = [dict(self.rows[0], segments=[{"cls": "fall", "start_s": 2.0, "end_s": 3.0}]), self.rows[3]]
+        stats = self.run_once()
+        self.assertEqual((stats["done"], stats["failed"]), (1, 1))
+        log = {r["clip_id"]: r for r in self.read_log()}
+        self.assertIn("timebase", log["ds/a"]["error"])
+        # 허용 범위 안(길이 x 1.05 + 0.5초)이면 통과
+        ek.check_label_timebase({"segments": [{"cls": "fall", "start_s": 0.0, "end_s": 0.7}]}, 6, 25.0)
+
     def test_cv2_frames_releases_capture(self):
         class Cap:
             def __init__(self):
@@ -427,3 +446,4 @@ class RunExtractionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

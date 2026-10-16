@@ -169,7 +169,11 @@ def extract_one(row: Dict[str, Any], out_path: Path, predictor: Predictor, open_
     if not video.is_file():
         raise FileNotFoundError(f"video not found: {row['video']}")
     raw_fps, frames = open_video(video)
-    fps, fps_source = normalize_fps(raw_fps)
+    container_fps, fps_source = normalize_fps(raw_fps)
+    fps = container_fps
+    if row.get("fps") is not None:
+        # manifest가 지정한 실제 촬영 fps (헤더 fps가 틀린 데이터셋)
+        fps, fps_source = float(row["fps"]), "manifest"
     container_frames = _container_frame_count(frames)
     crop = row.get("crop_px")
     if crop is not None:
@@ -178,6 +182,7 @@ def extract_one(row: Dict[str, Any], out_path: Path, predictor: Predictor, open_
     t = int(clip["ts"].shape[0])
     if t == 0:
         raise RuntimeError("no frames decoded")
+    check_label_timebase(row, t, fps)
     present_ratio = float(clip["present"].mean())
     meta = {
         "clip_format_version": CLIP_FORMAT_VERSION,
@@ -186,6 +191,7 @@ def extract_one(row: Dict[str, Any], out_path: Path, predictor: Predictor, open_
         "video": row["video"],
         "native_fps": fps,
         "fps_source": fps_source,
+        "container_fps": container_fps,
         "n_frames": t,
         "extractor": dict(extractor_meta),
         "present_ratio": round(present_ratio, 4),
@@ -219,6 +225,21 @@ class CroppedFrames:
             if not (0 <= x1 < x2 <= w and 0 <= y1 < y2 <= h):
                 raise ValueError(f"crop_px {self.crop} outside frame {w}x{h}")
             yield f[y1:y2, x1:x2]
+
+
+def check_label_timebase(row: Dict[str, Any], n_frames: int, fps: float) -> None:
+    """
+    라벨 구간이 클립 길이를 크게 넘으면 시간축이 어긋난 것 (예: 헤더 fps 오류) -> ValueError로 이 클립만 실패.
+    허용: 길이 x 1.05 + 0.5초 (le2i 일부 라벨이 끝을 0.6초 넘음)
+    """
+    segs = row.get("segments") or []
+    if not segs:
+        return
+    duration = n_frames / fps
+    last = max(float(s["end_s"]) for s in segs)
+    if last > duration * 1.05 + 0.5:
+        raise ValueError(f"label/timebase mismatch: last segment ends at {last:.2f}s but clip is "
+                         f"{duration:.2f}s ({n_frames} frames @ {fps:g}fps); set manifest fps")
 
 
 def _container_frame_count(frames: Any) -> Optional[int]:

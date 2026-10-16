@@ -32,12 +32,14 @@ FIELDS = ("clip_id", "dataset", "video", "label", "segments", "fall_start_s", "f
 
 
 def make_row(dataset: str, rel_id: str, video: str, segments: list, label_source: str, license: str,
-             subject=None, cam=None, event_group=None, label=None, crop_px=None) -> dict:
+             subject=None, cam=None, event_group=None, label=None, crop_px=None, fps=None) -> dict:
     """
     한 클립의 manifest 행을 만듭니다.
     segments는 시작 시각 순으로 정렬하고, label을 주지 않으면 fall 구간 유무로 정합니다.
     event_group을 주지 않으면 clip_id와 같게 둡니다 (단일 시점 데이터).
     crop_px: 영상에서 실제로 쓸 영역 [x1, y1, x2, y2] 픽셀 (선택). 예: URFD는 깊이|RGB 합성 영상이라 RGB 절반만 사용
+    fps: 라벨 시각의 기준이 되는 실제 촬영 fps (선택). 컨테이너 헤더 fps가 틀린 데이터에서 추출기가 이 값을 우선 사용
+         (예: MCFD avi 헤더는 120fps지만 실제 촬영과 OmniFall 라벨은 30fps)
     """
     clip_id = f"{dataset}/{rel_id}"
     segs = sorted(({"cls": s["cls"], "start_s": float(s["start_s"]), "end_s": float(s["end_s"])}
@@ -61,6 +63,8 @@ def make_row(dataset: str, rel_id: str, video: str, segments: list, label_source
     }
     if crop_px is not None:
         row["crop_px"] = [int(v) for v in crop_px]
+    if fps is not None:
+        row["fps"] = float(fps)
     return row
 
 
@@ -112,6 +116,10 @@ def validate_rows(rows) -> list:
             msg = crop_error(r["crop_px"])
             if msg:
                 errors.append(f"{where}: {msg}")
+        if "fps" in r:
+            f = r["fps"]
+            if isinstance(f, bool) or not isinstance(f, (int, float)) or not (1.0 <= float(f) <= 240.0):
+                errors.append(f"{where}: fps must be a number in [1, 240]")
 
         segs = r.get("segments")
         if not isinstance(segs, list):

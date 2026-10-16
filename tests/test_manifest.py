@@ -71,6 +71,12 @@ class ManifestRowsTest(unittest.TestCase):
             row = dict(good, crop_px=bad)
             self.assertTrue(any("crop_px" in e for e in validate_rows([row])), bad)
 
+    def test_fps_validation(self):
+        good = make_row("mcfd", "chute01/cam1", "v.avi", [], "omnifall", "x", fps=30)
+        self.assertEqual((good["fps"], validate_rows([good])), (30.0, []))
+        for bad in (0, 500, "30", True, None):
+            self.assertTrue(any("fps" in e for e in validate_rows([dict(good, fps=bad)])), bad)
+
     def test_write_load_roundtrip(self):
         rows = [make_row("d", f"c{i}", f"v{i}.mp4", [_seg("fall", i, i + 1)], "omnifall", "라이선스")
                 for i in range(3)]
@@ -168,6 +174,9 @@ class BuildManifestTest(unittest.TestCase):
         self.assertEqual({by_id[f"mcfd/chute01/cam{c}"]["event_group"] for c in (1, 2, 3)}, {"mcfd/chute01"})
         self.assertEqual(by_id["mcfd/chute02/cam1"]["event_group"], "mcfd/chute02")
         self.assertEqual(by_id["mcfd/chute01/cam2"]["cam"], "2")
+        # MCFD avi 헤더는 120fps지만 실제/라벨 기준은 30fps
+        self.assertEqual(by_id["mcfd/chute01/cam1"]["fps"], 30.0)
+        self.assertNotIn("fps", by_id["le2i/Coffee_room_01/video_14"])
         # URFD
         fall = by_id["urfd/fall-01"]
         self.assertEqual((fall["label"], fall["label_source"], fall["video"]),
