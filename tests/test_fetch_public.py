@@ -74,6 +74,16 @@ class SafeExtractTest(unittest.TestCase):
                 self.assertEqual(algo is None, expected is None, (name, fname))
         self.assertEqual(main(["list"]), 0)
 
+    def test_urfd_source(self):
+        names = [f[0] for f in SOURCES["urfd"]["files"]]
+        self.assertEqual(len(names), 72)
+        self.assertEqual(len(set(names)), 72)
+        for n in ("fall-01-cam0.mp4", "fall-30-cam0.mp4", "adl-01-cam0.mp4", "adl-40-cam0.mp4",
+                  "urfall-cam0-falls.csv", "urfall-cam0-adls.csv"):
+            self.assertIn(n, names)
+        self.assertFalse(any("cam1" in n for n in names))
+        self.assertIn("NC", SOURCES["urfd"]["license"])
+
 
 if __name__ == "__main__":
     unittest.main()

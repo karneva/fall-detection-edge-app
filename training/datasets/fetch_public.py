@@ -33,6 +33,7 @@ LOG_NAME = "_downloads.json"
 
 HF_W = "https://huggingface.co/datasets/simplexsigil2/wanfall/resolve/main/"
 HF_O = "https://huggingface.co/datasets/simplexsigil2/omnifall/resolve/main/"
+URFD = "https://fenix.ur.edu.pl/~mkepski/ds/data/"
 
 # name -> 출처. files: (저장 이름, URL, 체크섬 알고리즘, 기대값)
 SOURCES = {
@@ -48,6 +49,14 @@ SOURCES = {
               for k in ("cs", "cv") for d in ("le2i", "caucafall", "gmdcsa24", "mcfd", "up_fall", "cmdfall")
               for s in ("train", "val", "test")]
           + [("omnifall_README.md", HF_O + "README.md", None, None)],
+    },
+    "urfd": {
+        "what": "UR Fall Detection, 정면 카메라(cam0) 낙상 30 / ADL 40 mp4 + 프레임 단위 상태 라벨 CSV",
+        "license": "CC BY-NC-SA 4.0 (비상업 학술용)",
+        "page": "http://fenix.ur.edu.pl/~mkepski/ds/uf.html",
+        "files": [(f"{kind}-{i:02d}-cam0.mp4", URFD + f"{kind}-{i:02d}-cam0.mp4", None, None)
+                  for kind, n in (("fall", 30), ("adl", 40)) for i in range(1, n + 1)]
+                 + [(f, URFD + f, None, None) for f in ("urfall-cam0-falls.csv", "urfall-cam0-adls.csv")],
     },
     "gmdcsa24": {
         "what": "실제 침실 3곳, 낙상/ADL(침대 눕기 등 하드 네거티브), 초 단위 구간 라벨",
