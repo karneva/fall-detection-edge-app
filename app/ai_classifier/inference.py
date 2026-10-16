@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 from app.ai_classifier.features import normalize_sequence_v1
+from app.ai_classifier.model_meta import check_compatible, legacy_v1_meta, load_meta
 from app.ai_classifier.weights_resolver import resolve_weights_path, sha256_8
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,9 @@ class FallClassifier:
 
     가중치가 없거나 로드에 실패하면 enabled=False가 되고 모든 예측이 None을 반환합니다.
     (초기화되지 않은 랜덤 모델로 알람을 억제하는 일이 없도록 fail-open)
+
+    가중치 옆 "<weights>.meta.json"이 이 런타임과 맞지 않는 형식(예: features v2 모델)이면
+    역시 비활성화합니다. 메타 파일이 없으면 기존 v1 모델로 간주합니다.
     """
 
     def __init__(self, model_path: Optional[str] = None, threshold: float = 0.6, device=None):
@@ -25,6 +29,7 @@ class FallClassifier:
         self.model_path: Optional[str] = None
         self.weights_hash: Optional[str] = None
         self.load_error: Optional[str] = None
+        self.meta: Optional[Dict[str, Any]] = None
         self.threshold = threshold
         self.seq_len = 30
         self.device = None
@@ -42,6 +47,22 @@ class FallClassifier:
         if path is None:
             self.load_error = f"weights not found (model_path={model_path!r})"
             logger.error(f"[AI] classifier DISABLED: {self.load_error} -> rule-based result stands")
+            return
+
+        try:
+            meta = load_meta(path)
+        except Exception as e:
+            self.load_error = f"meta unreadable: {e}"
+            logger.error(f"[AI] classifier DISABLED: {self.load_error} ({path}) -> rule-based result stands")
+            return
+        if meta is None:
+            meta = legacy_v1_meta()
+            logger.info(f"[AI] no weights meta for {path} -> assuming legacy v1")
+        self.meta = meta
+        reason = check_compatible(meta)
+        if reason is not None:
+            self.load_error = f"incompatible meta: {reason}"
+            logger.error(f"[AI] classifier DISABLED: {self.load_error} ({path}) -> rule-based result stands")
             return
 
         try:
@@ -126,6 +147,8 @@ class FallClassifier:
             "weights_hash": self.weights_hash,
             "load_error": self.load_error,
             "threshold": self.threshold,
+            "meta": dict(self.meta) if isinstance(self.meta, dict) else None,
+            "feature_version": self.meta.get("feature_version") if isinstance(self.meta, dict) else None,
         }
 
 
@@ -138,6 +161,7 @@ class _DisabledClassifier(FallClassifier):
         self.model_path = None
         self.weights_hash = None
         self.load_error = reason
+        self.meta = None
         self.threshold = 0.6
         self.seq_len = 30
         self.device = None

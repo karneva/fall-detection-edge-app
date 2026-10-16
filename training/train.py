@@ -12,6 +12,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.ai_classifier.model import Fall1DCNN
+from app.ai_classifier.model_meta import current_git_sha, make_meta, write_meta
 from training.paths import DATA_DIR, WEIGHTS_DIR
 
 # 설정
@@ -47,6 +48,8 @@ def train():
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     
     best_val_acc = 0.0
+    # 가중치 옆에 남길 메타 (런타임이 입력 형식 호환 여부를 확인하는 데 사용)
+    meta = make_meta(trained_on=[DATA_PATH], git_sha=current_git_sha())
     
     print(f"Starting training... Train size: {len(X_train)}, Val size: {len(X_val)}")
     
@@ -95,9 +98,11 @@ def train():
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save(model.state_dict(), os.path.join(MODEL_SAVE_PATH, "fall_model_best.pth"))
+            write_meta(os.path.join(MODEL_SAVE_PATH, "fall_model_best.pth"), meta)
             print(f"New best accuracy! Model saved. (Acc: {val_acc:.2f}%)")
 
     torch.save(model.state_dict(), os.path.join(MODEL_SAVE_PATH, "fall_model_last.pth"))
+    write_meta(os.path.join(MODEL_SAVE_PATH, "fall_model_last.pth"), meta)
     print("Training finished.")
 
 if __name__ == "__main__":

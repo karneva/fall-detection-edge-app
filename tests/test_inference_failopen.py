@@ -50,6 +50,8 @@ class NoTorchTest(unittest.TestCase):
         self.assertFalse(clf.enabled)
         self.assertIsNone(clf.predict_proba(SEQ))
         self.assertIn("boom", clf.status()["load_error"])
+        self.assertIsNone(clf.status()["meta"])
+        self.assertIsNone(clf.status()["feature_version"])
         inference.reset_classifier()
 
     def test_singleton_built_once_under_concurrency(self):
@@ -147,6 +149,54 @@ class TorchLoadTest(unittest.TestCase):
         other = self.dir / "other.pth"
         self.torch.save(Fall1DCNN(seq_len=20).state_dict(), other)
         self.assertFalse(self.clf(other).enabled)
+
+    def test_missing_meta_is_legacy_v1(self):
+        from app.ai_classifier.model_meta import legacy_v1_meta
+
+        c = self.clf(self.path)
+        self.assertTrue(c.enabled)
+        st = c.status()
+        self.assertEqual(st["meta"], legacy_v1_meta())
+        self.assertEqual(st["feature_version"], "v1")
+
+    def test_compatible_meta_loads_and_status_exposes_it(self):
+        from app.ai_classifier.model_meta import make_meta, write_meta
+
+        meta = make_meta(trained_on=["urfd"], git_sha="abc")
+        write_meta(self.path, meta)
+        c = self.clf(self.path)
+        self.assertTrue(c.enabled)
+        self.assertEqual(c.status()["meta"], meta)
+        self.assertEqual(c.status()["feature_version"], "v1")
+        self.assertIsNotNone(c.predict_proba(SEQ))
+
+    def test_incompatible_meta_disabled(self):
+        from app.ai_classifier.model_meta import legacy_v1_meta, write_meta
+
+        variants = {"arch": "Other", "feature_version": "v2", "in_channels": 92, "seq_len": 60, "meta_version": 99}
+        for key, value in variants.items():
+            meta = legacy_v1_meta()
+            meta[key] = value
+            write_meta(self.path, meta)
+            c = self.clf(self.path)
+            self.assertFalse(c.enabled, key)
+            self.assertIn("meta", c.load_error)
+            self.assertIn(key, c.load_error)
+            self.assertIsNone(c.predict_proba(SEQ))
+            self.assertEqual(c.predict(SEQ), (None, 0.0))
+            self.assertIsNone(c.model_path)
+            st = c.status()
+            self.assertEqual(st["meta"], meta)
+            self.assertEqual(st["feature_version"], meta["feature_version"])
+
+    def test_corrupt_meta_disabled(self):
+        from app.ai_classifier.model_meta import meta_path_for
+
+        meta_path_for(self.path).write_text("{oops", encoding="utf-8")
+        c = self.clf(self.path)
+        self.assertFalse(c.enabled)
+        self.assertIn("meta", c.load_error)
+        self.assertIsNone(c.status()["meta"])
 
 
 if __name__ == "__main__":

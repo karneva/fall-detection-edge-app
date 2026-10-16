@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import os
 from pathlib import Path
+from typing import List, Optional
 import sys
 
 if __package__ in (None, ""):
@@ -12,6 +13,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.ai_classifier.model import Fall1DCNN
+from app.ai_classifier.model_meta import current_git_sha, make_meta, write_meta
 from training.paths import ACTIVE_DATA_DIR, DATA_DIR, WEIGHTS_DIR
 
 # 설정
@@ -29,9 +31,10 @@ def load_data(phase):
     return X, y
 
 
-def load_active_learning_arrays(active_dir: str):
+def load_active_learning_arrays(active_dir: str, loaded_files: Optional[List[str]] = None):
     """
     active_learning 디렉터리 아래의 X_*.npy / y_*.npy 쌍을 모두 찾아 병합합니다.
+    loaded_files가 주어지면 실제로 병합된 X 파일 경로를 추가합니다 (가중치 메타의 trained_on 기록용).
     예:
       X_not_fall.npy + y_not_fall.npy
       X_custom_adl.npy + y_custom_adl.npy
@@ -58,6 +61,8 @@ def load_active_learning_arrays(active_dir: str):
             continue
 
         print(f"Loaded active set: {x_path.name} ({len(x_arr)} samples)")
+        if loaded_files is not None:
+            loaded_files.append(str(x_path))
         x_parts.append(x_arr)
         y_parts.append(y_arr)
 
@@ -73,7 +78,8 @@ def train_active():
     X_val, y_val = load_data("val")
     
     # 2. 로컬 수집 데이터(Active Learning) 로드 및 병합
-    X_active, y_active = load_active_learning_arrays(ACTIVE_DATA_PATH)
+    active_files: List[str] = []
+    X_active, y_active = load_active_learning_arrays(ACTIVE_DATA_PATH, active_files)
     if X_active is not None and y_active is not None:
         print(f"Merging Active Learning Data: {len(X_active)} samples")
 
@@ -103,6 +109,11 @@ def train_active():
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     
     best_val_acc = 0.0
+    # 가중치 옆에 남길 메타 (런타임이 입력 형식 호환 여부를 확인하는 데 사용)
+    trained_on = [DATA_PATH]
+    if X_active is not None:
+        trained_on += active_files
+    meta = make_meta(trained_on=trained_on, git_sha=current_git_sha())
     
     print(f"Starting Active Learning Train... Final Train Size: {len(X_train)}")
     
@@ -145,6 +156,7 @@ def train_active():
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save(model.state_dict(), os.path.join(MODEL_SAVE_PATH, "fall_model_active_best.pth"))
+            write_meta(os.path.join(MODEL_SAVE_PATH, "fall_model_active_best.pth"), meta)
             print(f"Saved Active Best Model (Acc: {val_acc:.2f}%)")
 
     print("Active learning training finished.")
