@@ -140,7 +140,8 @@ class LiveModeEventTest(unittest.TestCase):
         for doc in (sup_doc, l1_doc):
             win = doc["snapshot"]["event_window"]
             self.assertLessEqual(win["t_start"], truth["fall_start_ts"])
-            self.assertEqual(len(win["kps"]), win["n_frames"])
+            self.assertEqual(len(win["kps"]), len(win["ts"]))
+            self.assertGreaterEqual(len(win["kps"]), win["n_frames"])  # 앞뒤 여유 프레임 포함
             self.assertEqual(len(doc["snapshot"]["ai_input"]["kps"]), 30)
             self.assertEqual(doc["params"]["ai_mode"], "veto")
             self.assertAlmostEqual(doc["processing_fps"], 15.0, delta=0.5)

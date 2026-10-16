@@ -36,6 +36,9 @@ class BufferTest(unittest.TestCase):
             b.append(100.0 + i * 0.1, frame, [0, 0, 1, 1])
         w = b.window(100.5, 101.5)
         self.assertEqual(w["n_frames"], 11)
+        padded = b.window(100.5, 101.5, pad_s=0.2)
+        self.assertEqual(window_summary(padded), window_summary(w))  # 요약 불변
+        self.assertEqual(len(padded["ts"]), 15)  # 100.3 ~ 101.7
         self.assertEqual(w["n_missing"], sum(1 for k in w["kps"] if k is None))
         self.assertAlmostEqual(w["fps"], 10.0, places=3)
         self.assertFalse(w["truncated"])
@@ -104,7 +107,13 @@ class EngineEventWindowTest(unittest.TestCase):
             self.assertAlmostEqual(summ["t_end"] - summ["t_start"], 4.0, places=6)
             self.assertAlmostEqual(summ["fps"], fps, delta=0.5)
             snap = engine.get_incident_snapshot()
-            self.assertEqual(len(snap["event_window"]["kps"]), summ["n_frames"])
+            win = snap["event_window"]
+            # 전체 구간에는 앞뒤 여유(pad_s)만큼 프레임이 더 담기고, 요약은 원래 구간 기준
+            self.assertEqual(win["pad_s"], 0.25)
+            self.assertGreater(len(win["kps"]), summ["n_frames"])
+            self.assertLess(win["ts"][0], summ["t_start"])
+            self.assertGreater(win["ts"][-1], summ["t_end"])
+            self.assertEqual(sum(summ["t_start"] <= t <= summ["t_end"] for t in win["ts"]), summ["n_frames"])
             self.assertEqual(len(snap["ai_input"]["kps"]), 30)
             self.assertEqual(snap["ai"]["decision"], "fall")
 

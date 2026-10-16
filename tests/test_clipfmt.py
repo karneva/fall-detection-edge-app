@@ -447,3 +447,45 @@ class RunExtractionTest(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+@unittest.skipUnless(HAS_NUMPY, "numpy 없음")
+class SidecarExtractorParityTest(unittest.TestCase):
+    """같은 동작을 추출기 클립과 운영 sidecar(kp_buffer 사건 구간)로 만들었을 때 v2 특징이 같아야 함."""
+
+    def test_window_v2_matches(self):
+        from app.ai_classifier.features import MAX_GAP_S, window_v2
+
+        rng = np.random.default_rng(3)
+        fps, n = 15.0, 90
+        t0 = 1000.0 + 0.013  # 운영 ts는 프레임 격자와 어긋나 있음
+        ts_abs = t0 + np.arange(n) / fps
+        kps = np.zeros((n, 17, 3), np.float32)
+        base = rng.random((17, 2)) * 0.2 + 0.4
+        for i in range(n):
+            kps[i, :, :2] = base + 0.002 * i
+            kps[i, :, 2] = 0.9
+        bbox = np.tile(np.array([0.3, 0.2, 0.6, 0.9], np.float32), (n, 1))
+        wh = (1920, 1080)
+
+        # 운영: kp_buffer에 쌓고 [ts_s, ts_e] 구간을 여유와 함께 잘라 sidecar로 저장
+        buf = TimedKeypointBuffer(horizon_s=30.0)
+        for i in range(n):
+            buf.append(ts_abs[i], kps[i].tolist(), bbox[i].tolist(), wh)
+        ts_s, ts_e = ts_abs[30] + 0.031, ts_abs[30] + 0.031 + 4.0
+        win = buf.window(ts_s, ts_e, pad_s=0.25)
+        side = from_sidecar(json.loads(json.dumps({"snapshot": {"event_window": win}})))
+        m = side["meta"]
+        f_side = window_v2(side["ts"], side["kps"], side["bbox"], side["present"], side["frame_wh"],
+                           m["window_start_s"], m["window_end_s"])
+
+        # 학습: 영상 전체 클립에서 같은 구간
+        f_clip = window_v2(ts_abs - t0, kps, bbox, np.ones(n, bool), np.array(wh), ts_s - t0, ts_e - t0)
+        self.assertEqual(f_side.shape, (92, 60))
+        self.assertGreater(f_side[-17:, 0].sum(), 0)  # 첫 열도 마스크되지 않음
+        np.testing.assert_allclose(f_side, f_clip, atol=1e-4)
+        # 여유가 없으면 첫 열이 마스크됨 (여유가 필요한 이유)
+        bare = from_sidecar(json.loads(json.dumps({"snapshot": {"event_window": buf.window(ts_s, ts_e)}})))
+        f_bare = window_v2(bare["ts"], bare["kps"], bare["bbox"], bare["present"], bare["frame_wh"],
+                           bare["meta"]["window_start_s"], bare["meta"]["window_end_s"])
+        self.assertEqual(f_bare[-17:, 0].sum(), 0)
+        self.assertGreaterEqual(0.25, MAX_GAP_S)

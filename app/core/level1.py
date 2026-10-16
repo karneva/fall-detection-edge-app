@@ -146,6 +146,8 @@ class Level1Params:
     event_buffer_s: float = 20.0
     event_window_pre_s: float = 1.5
     event_window_post_s: float = 2.5
+    # 구간 앞뒤 여유: 학습 특징(v2) 리샘플링이 경계 값을 보간하려면 경계 밖 샘플이 필요 (>= features.MAX_GAP_S)
+    event_window_pad_s: float = 0.25
 
 
 class _ClassifierVerifier:
@@ -874,7 +876,7 @@ class Level1Engine:
             self.state == "ABNORMAL"
             and self.event_window is None
             and self.abnormal_start_ts is not None
-            and ts - self.abnormal_start_ts >= self.p.event_window_post_s
+            and ts - self.abnormal_start_ts >= self.p.event_window_post_s + self.p.event_window_pad_s
         ):
             self._capture_event_window()
 
@@ -883,7 +885,8 @@ class Level1Engine:
             return
         anchor = self.event_anchor_ts if self.event_anchor_ts is not None else self.abnormal_start_ts
         self.event_window = self.kp_buffer.window(
-            anchor - self.p.event_window_pre_s, self.abnormal_start_ts + self.p.event_window_post_s
+            anchor - self.p.event_window_pre_s, self.abnormal_start_ts + self.p.event_window_post_s,
+            pad_s=self.p.event_window_pad_s,
         )
 
     def _event_window_summary(self) -> Optional[Dict[str, Any]]:

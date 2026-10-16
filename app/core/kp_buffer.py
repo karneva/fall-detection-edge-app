@@ -76,15 +76,20 @@ class TimedKeypointBuffer:
         while self._buf and ts - self._buf[0][0] > self.horizon_s:
             self._buf.popleft()
 
-    def window(self, t_start: float, t_end: float) -> Dict[str, Any]:
+    def window(self, t_start: float, t_end: float, pad_s: float = 0.0) -> Dict[str, Any]:
         """
         [t_start, t_end] 구간의 프레임을 반환합니다.
+        pad_s: 앞뒤로 더 담을 여유 (초). 리샘플링이 구간 경계의 값을 보간하려면 경계 밖 샘플이 필요함.
+               ts/kps/bbox에는 [t_start - pad_s, t_end + pad_s]가 담기고,
+               n_frames/n_missing/fps/truncated 요약은 원래 구간 [t_start, t_end] 기준 (이벤트 요약 불변)
         frame_wh: 구간 안에서 마지막으로 기록된 원본 해상도 [w, h] (없으면 None)
         """
+        pad = max(0.0, float(pad_s))
         picked = [(t, f, b) for t, f, b, _ in self._buf if t_start <= t <= t_end]
+        context = [(t, f, b) for t, f, b, _ in self._buf if t_start - pad <= t <= t_end + pad]
         wh = None
         for t, _, _, w in self._buf:
-            if t_start <= t <= t_end and w is not None:
+            if t_start - pad <= t <= t_end + pad and w is not None:
                 wh = w
         n = len(picked)
         span = (picked[-1][0] - picked[0][0]) if n >= 2 else 0.0
@@ -96,9 +101,10 @@ class TimedKeypointBuffer:
             "fps": round((n - 1) / span, 2) if span > 0 else None,
             # 요청 구간이 버퍼 범위를 벗어나 앞부분이 잘렸는지
             "truncated": bool(not self._buf or self._buf[0][0] > t_start),
-            "ts": [t for t, _, _ in picked],
-            "kps": [f for _, f, _ in picked],
-            "bbox": [b for _, _, b in picked],
+            "pad_s": pad,
+            "ts": [t for t, _, _ in context],
+            "kps": [f for _, f, _ in context],
+            "bbox": [b for _, _, b in context],
             "frame_wh": list(wh) if wh is not None else None,
         }
 

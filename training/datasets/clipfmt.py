@@ -242,6 +242,10 @@ def from_sidecar(sidecar: Dict[str, Any], **meta: Any) -> Dict[str, Any]:
     meta.setdefault("event_ts", event.get("ts"))
     meta.setdefault("human_label", review.get("human_label"))
     meta.setdefault("abnormal_start_ts", snap.get("abnormal_start_ts"))
+    # 사건 구간(여유 제외)의 클립 ts 기준 시각: window_v2(..., window_start_s, window_end_s)에 그대로 사용
+    for key, out in (("t_start", "window_start_s"), ("t_end", "window_end_s")):
+        v = win.get(key)
+        meta.setdefault(out, float(v) - ts_abs[0] if isinstance(v, (int, float)) and not isinstance(v, bool) else None)
     # 검수자가 표시한 낙상 구간(절대 시각) -> 클립 ts 기준 초 (없으면 None)
     for key, out in (("fall_start_ts", "review_fall_start_s"), ("fall_end_ts", "review_fall_end_s")):
         v = review.get(key)
