@@ -55,6 +55,7 @@ class ArgsTest(unittest.TestCase):
 
     def test_parse_stages_orders_and_validates(self):
         self.assertEqual(RP.parse_stages("f,a,E"), ["A", "E", "F"])
+        self.assertEqual(RP.parse_stages("F,es,E"), ["E", "Es", "F"])
         with self.assertRaises(ValueError):
             RP.parse_stages("A,Z")
 
@@ -195,10 +196,30 @@ class RunFoldSmokeTest(unittest.TestCase):
                 res2 = RP.run_fold(0, self.rows, self.folds, self.clips, ["F"], seeds=1, out_dir=out,
                                    device="cpu", epochs=1)
             self.assertAlmostEqual(res2["F2"]["runs"][0]["threshold"], th_before, places=5)
+            # Es만 다시: 저장된 E 모델로 같은 클립 결과, E 결과 파일은 그대로
+            e_before = {v: (out / "fold0" / f"{v}.json").read_bytes() for v in RP.STAGE_VARIANTS["E"]}
+            with contextlib.redirect_stdout(io.StringIO()):
+                res3 = RP.run_fold(0, self.rows, self.folds, self.clips, ["Es"], seeds=1, out_dir=out,
+                                   device="cpu", epochs=1)
+            self.assertEqual(set(res3), set(RP.STAGE_VARIANTS["Es"]))
+            for v in RP.STAGE_VARIANTS["Es"]:
+                a = [(o["clip_id"], o["alarm"], o["p_fall"]) for o in res[v]["runs"][0]["outcomes"]]
+                b = [(o["clip_id"], o["alarm"], o["p_fall"]) for o in res3[v]["runs"][0]["outcomes"]]
+                self.assertEqual([x[:2] for x in a], [x[:2] for x in b], v)
+                for (_, _, pa), (_, _, pb) in zip(a, b):
+                    self.assertEqual(len(pa), len(pb))
+                    for x, y in zip(pa, pb):
+                        self.assertAlmostEqual(x, y, places=5)
+                self.assertEqual(res3[v]["base"], RP.ES_BASE[v][0])
+                self.assertIn("in_tail", res3[v]["runs"][0]["outcomes"][0])
+            for v, raw in e_before.items():
+                self.assertEqual((out / "fold0" / f"{v}.json").read_bytes(), raw)
             s = RP.summarize_out(out)
             self.assertIn("A", s["variants"])
             md = (out / "summary.md").read_text(encoding="utf-8")
             self.assertIn("| F2b |", md)
+            self.assertIn("| E1max | E1 |", md)
+            self.assertIn("E1max", s["paired"])
 
 
 if __name__ == "__main__":
