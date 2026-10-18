@@ -203,7 +203,19 @@ progression_v1로 알게 된 것:
   - ADL 오탐 중 침대·소파 누움이 많으면 Day 9에 장면 분할(S)
   - 앞단을 먼저 바꾸면 Day 6 결과를 다시 재야 하므로, Day 7을 Day 6보다 먼저 할지도 함께 정함
 
-### Day 6: 포즈 시퀀스 이상 탐지 (논문 구현)
+### Day 6: 포즈 시퀀스 이상 탐지 (논문 구현) ✅
+
+결과: [MODEL_STUDY.md의 G와 L](MODEL_STUDY.md)
+
+- `training/anomaly/`: Mahalanobis, 1D conv 오토인코더, STG-NF(직접 구현, 가역성과 log|det| 테스트 포함)
+- 정상 창만으로 학습한 STG-NF: AI 호출 AUC 0.84, 같은 오탐률 recall 0.569 (지도학습 E0max 0.589).
+  낙상 라벨을 전혀 안 쓴 GnfS도 같은 수준. 낙상 클립 약 90개(10%)만 라벨링한 지도학습이 이와 비슷(0.561~0.574)
+- 이상 탐지는 정상 데이터가 적은 MCFD 시점에서 약함 (창 AUC 0.61~0.63, 지도학습 0.94)
+- 모든 변형의 같은 오탐률 recall이 0.53~0.60으로 규칙 상한 0.608 아래에 몰려 있음 -> 다음 이득은 포즈 검출(Day 7)
+- 리뷰에서 고친 것: STG-NF 관절 그래프의 머리-몸통 연결 누락, 라벨 효율 E0의 학습 방식 차이(early stopping),
+  "라벨 0%" 표현(정상 집합에 낙상 전 창이 들어감 -> ADL 클립만 쓰는 GnfS 추가)
+
+계획했던 내용:
 
 낙상은 정상 행동보다 드물고 라벨 비용이 큽니다. 정상 행동만으로 학습해 벗어나는 정도를 점수로 쓰는 방식을
 지도학습(C~E)과 같은 표에서 비교합니다.
@@ -265,7 +277,10 @@ Day 5에서 포즈 묶음 117개 중 40개는 검출이 간헐적일 뿐인데 �
 - golden trace가 바뀌는 의도된 변경이므로 이유를 남기고 재생성, 합성 시나리오 안전 테스트는 그대로 통과해야 함
 - A 재측정 후 C/E/G를 같은 `folds_v1`로 재측정 (D/E 학습 창이 규칙 재생에 의존하므로 재학습)
 
-### Day 8: 런타임 정렬과 엣지 최적화 (Jetson)
+### Day 8: 런타임 정렬과 추론 최적화 (노트북)
+
+Jetson을 더 이상 쓸 수 없어(2026-10-18) 최적화 측정은 노트북(RTX 4050 Laptop, CPU)에서 합니다.
+지연 수치는 Jetson 값이 아니라 같은 모델 사이의 상대 비교로만 씁니다.
 
 하루를 넘으면 8a(런타임 정렬)와 8b(엣지 최적화)로 나눕니다.
 
@@ -279,14 +294,19 @@ Day 5에서 포즈 묶음 117개 중 40개는 검출이 간헐적일 뿐인데 �
 - `training/export_onnx.py`: 분류기 ONNX 변환과 PyTorch-ORT parity 테스트
 - 타깃 연속성: 후보가 1명이면 switch 판정 금지, ABNORMAL/억제 감시 중 스위치 리셋 금지, lost 중 승격 평가
 
-8b. 포즈 모델 최적화 표
+8b. 포즈 모델 최적화 표 (노트북 기준)
 
 - 기준은 현재 운영인 yolov8s-pose PyTorch FP32 (Day 7 개선 모델이 있으면 그 모델도 같은 형식으로).
-  비교 대상은 TensorRT FP16 / INT8 (INT8 보정 이미지는 학습 분포에서 추출)과 yolov8n-pose (크기 효과)
-- 변환과 지연·FPS: 기존 `scripts/jetson/export_tensorrt.py --model`, `benchmark_models.py`(`PT_MODEL_PATH`,
-  `ENGINE_MODEL_PATH`) 사용. 두 스크립트 기본값이 yolov8n-pose라 운영 모델을 명시해야 함
-- OKS AP는 Day 7 평가셋, 단계 T의 recall/오탐은 노트북 TensorRT 엔진으로 평가 영상을 다시 추출해서 측정 [owner, GPU]
-- [owner, Jetson] 지연과 처리 FPS 측정
+  비교 대상:
+  - GPU FP16
+  - ONNX Runtime (CPU, GPU)
+  - INT8 양자화 (ONNX Runtime 정적 양자화, 보정 이미지는 학습 분포에서 추출)
+  - TensorRT FP16/INT8: 노트북에 설치될 때만
+  - yolov8n-pose (크기 효과)
+- 지연·FPS: 노트북 GPU와 CPU(스레드 수 제한, 저사양 엣지 대용)에서 측정. 기존 `scripts/jetson/` 스크립트는
+  변환 참고용으로만 씀
+- OKS AP는 Day 7 평가셋, 단계 T의 recall/오탐은 각 형식으로 평가 영상을 다시 추출해서 측정 [owner, GPU]
+- Jetson 실측은 하지 않음. 포트폴리오에는 "Jetson 배포 구조로 설계, 최적화 비교는 노트북에서 측정"으로 적음
 
 ### Day 9: 일반화, 장면 맥락(선택), 포트폴리오 정리
 
