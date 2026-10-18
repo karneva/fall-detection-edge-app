@@ -104,6 +104,11 @@ class Level1Params:
     # 웜업 프레임
     warmup_frames: int = 12
 
+    # 짧은 미검출 유예 (초). 사람이 이 시간보다 짧게 끊겨 검출되지 않으면 워밍업 카운터와 진입 신호 누적값을
+    # 유지하고, ABNORMAL이면 시간 기준 판정(타임아웃)을 이어감. 0이면 기존 동작 (한 프레임만 놓쳐도 초기화).
+    # 이보다 긴 미검출(화면 밖 등)은 기존과 같음.
+    lost_grace_s: float = 0.0
+
     # 부분 신체 판단용 마진
     partial_edge_margin: float = 0.06
     partial_big_w: float = 0.45
@@ -209,6 +214,8 @@ class Level1Engine:
         self.last_drop_ts: Optional[float] = None
 
         self.present_streak: int = 0
+        # 연속 미검출이 시작된 시각 (lost_grace_s 판정용, 사람이 보이면 None)
+        self.lost_since_ts: Optional[float] = None
 
         self.level1_ts: Optional[float] = None
         self.cooldown_until_ts: float = 0.0
@@ -275,6 +282,7 @@ class Level1Engine:
         self.last_drop_ts = None
 
         self.present_streak = 0
+        self.lost_since_ts = None
 
         # 쿨다운은 초기화 대상에서 제외하고 유지함
         cooldown_until = self.cooldown_until_ts
@@ -482,11 +490,20 @@ class Level1Engine:
         if is_lost:
             self.kp_buffer.append(ts, None, frame_wh=frame_wh_from_track(tracks[0] if tracks else None))
             self._maybe_capture_event_window(ts)
+            if self.lost_since_ts is None:
+                self.lost_since_ts = ts
+            if self.p.lost_grace_s > 0 and ts - self.lost_since_ts < self.p.lost_grace_s:
+                # 짧은 미검출 (검출이 잠깐 끊김): 워밍업 카운터와 누적값을 유지하고,
+                # ABNORMAL이면 시간 기준 판정(타임아웃)만 이어감 (정지 누적은 관측이 없으므로 진행하지 않음)
+                if self.state == "ABNORMAL" and self.abnormal_start_ts is not None:
+                    return self._check_timeout(ts, frame_index, ts - self.abnormal_start_ts, None, None)
+                return None
             self.present_streak = 0
             self.enter_acc_s = 0.0
             self.posture_acc_s = 0.0
             self.shoulder_acc_s = 0.0
             return None
+        self.lost_since_ts = None
 
         t0 = tracks[0]
         bbox = t0.get("bbox")
@@ -747,38 +764,9 @@ class Level1Engine:
                 }
 
             # 낙상 판단 Case 2: 타임아웃 발생 (붕괴 확정 시에만)
-            if time_since_abnormal >= self.p.abnormal_timeout_s and not self.level1_fired and self.ai_suppressed_ts is None:
-                if (not self.p.timeout_requires_confirm) or self.abnormal_confirmed:
-                    # AI 2차 검증 수행 (타임아웃 시에도 적용)
-                    ai = self._verify_with_ai(ts)
-                    self.ai_last = ai
-                    if ai["suppress"]:
-                        logger.info(f"[AI SUPPRESSED] Timeout fall, but AI says ADL (p_fall={ai['p_fall']:.2f})")
-                        return self._enter_suppressed_watch(ts, frame_index, "abnormal_timeout", ai)
-
-                    self._fire_level1(ts)
-
-                    # 타임아웃의 경우에도 신뢰도 계산
-                    conf_score, conf_detail = self._calculate_confidence()
-
-                    return {
-                        "type": "level1",
-                        "ts": ts,
-                        "frame_index": frame_index,
-                        "reason": "abnormal_timeout",
-                        "values": {
-                            "time_since_abnormal": time_since_abnormal,
-                            "confirmed": self.abnormal_confirmed,
-                            "center_move": center_move,
-                            "kp_move": kp_move,
-                            "confidence_score": conf_score,
-                            "confidence_detail": conf_detail,
-                            "ai": ai,
-                            "event_window": self._event_window_summary(),
-                        },
-                    }
-                else:
-                    logger.info(f"[Timeout suppressed] abnormal_s={time_since_abnormal:.1f} but not confirmed. keep ABNORMAL")
+            ev = self._check_timeout(ts, frame_index, time_since_abnormal, center_move, kp_move)
+            if ev is not None:
+                return ev
 
             # 낙상 판단 Case 3: AI 억제 이후에도 붕괴 상태가 오래 지속되면 AI와 무관하게 승격
             # 래치된 플래그만 보지 않고 '지금도 쓰러져 있음'을 연속으로 확인함
@@ -910,6 +898,47 @@ class Level1Engine:
             "event_window": self.event_window,
             "ai_input": self.ai_input_last,
             "ai": self.ai_last,
+        }
+
+    def _check_timeout(self, ts: float, frame_index: int, time_since_abnormal: float,
+                       center_move: Optional[float], kp_move: Optional[float]) -> Optional[Dict[str, Any]]:
+        """
+        낙상 판단 Case 2: ABNORMAL 진입 후 abnormal_timeout_s가 지났고 붕괴가 확정되었으면 AI 검증 후 LEVEL1
+        (또는 AI 억제 감시). 아직이거나 붕괴 미확정이면 None. step()과 짧은 미검출 유예 중에 같이 씀.
+        """
+        if not (time_since_abnormal >= self.p.abnormal_timeout_s and not self.level1_fired
+                and self.ai_suppressed_ts is None):
+            return None
+        if self.p.timeout_requires_confirm and not self.abnormal_confirmed:
+            logger.info(f"[Timeout suppressed] abnormal_s={time_since_abnormal:.1f} but not confirmed. keep ABNORMAL")
+            return None
+        # AI 2차 검증 수행 (타임아웃 시에도 적용)
+        ai = self._verify_with_ai(ts)
+        self.ai_last = ai
+        if ai["suppress"]:
+            logger.info(f"[AI SUPPRESSED] Timeout fall, but AI says ADL (p_fall={ai['p_fall']:.2f})")
+            return self._enter_suppressed_watch(ts, frame_index, "abnormal_timeout", ai)
+
+        self._fire_level1(ts)
+
+        # 타임아웃의 경우에도 신뢰도 계산
+        conf_score, conf_detail = self._calculate_confidence()
+
+        return {
+            "type": "level1",
+            "ts": ts,
+            "frame_index": frame_index,
+            "reason": "abnormal_timeout",
+            "values": {
+                "time_since_abnormal": time_since_abnormal,
+                "confirmed": self.abnormal_confirmed,
+                "center_move": center_move,
+                "kp_move": kp_move,
+                "confidence_score": conf_score,
+                "confidence_detail": conf_detail,
+                "ai": ai,
+                "event_window": self._event_window_summary(),
+            },
         }
 
     def _fire_level1(self, ts: float):
