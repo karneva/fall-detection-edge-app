@@ -1527,6 +1527,7 @@ def run_fold(k: int, rows: List[Dict[str, Any]], folds: Dict[str, int], clips: D
         # 학습할 탐지기: 요청된 G{kind} + GnfE0용 nf (Gnf를 다시 돌리지 않으면 저장된 모델을 먼저 찾음)
         fit_kinds = [kd for kd in AN.KINDS if any(G_KIND.get(v) == kd for v in g_needed)]
         strict_needed = [v for v in g_needed if v in G_STRICT]
+        g_trainers = [v for v in g_needed if v in G_KIND or v in G_STRICT]
         combo_kinds = sorted({G_COMBO[v][0] for v in g_needed if v in G_COMBO})
         runs_g: Dict[str, List[Dict[str, Any]]] = {v: [] for v in g_needed}
         n_params_g: Dict[str, Any] = {}
@@ -1566,19 +1567,21 @@ def run_fold(k: int, rows: List[Dict[str, Any]], folds: Dict[str, int], clips: D
                     tr_cache["X_n"] = X_tr[neg]
                     tr_cache["X_s"] = X_tr[adl]
                     m_tr_n = [m for m, ok in zip(m_tr, neg) if ok]
+                    m_tr_s = [m for m, ok in zip(m_tr, adl) if ok]
                     del X_tr
                     tr_cache["t_build"] = time.time() - ts_b
                     n_win.update({"train_normal": int(neg.sum()), "train_normal_adl": int(adl.sum()),
                                   "train_dropped_pos": int((~neg).sum()),
-                                  "train_kinds": W.count_windows(m_tr_n, by=("kind", "y"))})
+                                  "train_kinds": W.count_windows(m_tr_n, by=("kind", "y")),
+                                  "train_kinds_adl": W.count_windows(m_tr_s, by=("kind", "y"))})
                     _log(f"fold {k}: G seed {seed} normal windows train {tr_cache['X_n'].shape} "
                          f"(ADL clips only {tr_cache['X_s'].shape}), val {X_va_n.shape} ({len(X_va_s)}), "
                          f"test {X_te.shape} ({tr_cache['t_build']:.0f}s)")
                 return tr_cache
 
             def build_share():
-                # 창 생성 시간은 학습한 변형들이 나눠 가짐
-                return tr_cache.get("t_build", 0.0) / max(1, len(g_needed))
+                # 창 생성 시간은 이번 실행에서 실제로 학습하는 변형들(GnfE0 제외)이 나눠 가짐
+                return tr_cache.get("t_build", 0.0) / max(1, len(g_trainers))
 
             fitted: Dict[str, Tuple[Any, Any]] = {}
             for kind in fit_kinds + [kd for kd in combo_kinds if kd not in fit_kinds]:
@@ -1680,7 +1683,7 @@ def _veto_rates(p, y) -> Dict[str, Any]:
 def _g_train_summary(det, t_s: float, s_va, n_win: Dict[str, Any], strict: bool = False) -> Dict[str, Any]:
     """
     이상 탐지기 학습 기록 요약 (JSON용): epoch 곡선, best epoch, 검증 점수 통계, 낙상 라벨 0개.
-    strict: ADL 클립 창만으로 학습한 변형 (학습/검증 창 수를 그 집합 기준으로 기록)
+    strict: ADL 클립 창만으로 학습한 변형 (학습/검증 창 수와 창 종류 분포를 그 집합 기준으로 기록)
     """
     import numpy as np
 
@@ -1698,7 +1701,7 @@ def _g_train_summary(det, t_s: float, s_va, n_win: Dict[str, Any], strict: bool 
                          "mean": float(fin.mean()) if len(fin) else None,
                          "q50": float(np.quantile(fin, 0.5)) if len(fin) else None,
                          "q80": float(np.quantile(fin, 0.8)) if len(fin) else None},
-           "train_kinds": n_win.get("train_kinds")}
+           "train_kinds": n_win.get("train_kinds_adl" if strict else "train_kinds")}
     for key in ("n_train_segments", "n_val_segments", "noise", "recipe", "arch", "device", "shrinkage",
                 "n_features", "train_loss", "val_loss"):
         if key in info:
@@ -1968,7 +1971,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "epochs_override": args.epochs, "fa_ref": args.fa_ref}
 
     if args.summarize_only:
-        summarize_out(out_dir, meta, fa_ref=args.fa_ref)
+        # 요약만 다시 만들 때는 실행 설정(단계, seed, epoch)이 이번 명령의 기본값일 뿐이라 기록하지 않음
+        summarize_out(out_dir, {"fa_ref": args.fa_ref}, fa_ref=args.fa_ref)
         _log(f"summary written to {out_dir}")
         return 0
 

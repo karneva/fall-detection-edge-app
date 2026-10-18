@@ -277,6 +277,10 @@ class RunFoldGTest(unittest.TestCase):
             self.assertEqual(gs["normal_set"], "adl_clips_only")
             self.assertLessEqual(gs["runs"][0]["train"]["n_train"], gn["runs"][0]["train"]["n_train"])
             self.assertIn("ADL clips", gs["calibration"]["fit_on"])
+            # 기록된 학습 창 종류도 ADL 클립 창만 (낙상 전 창 없음), 합이 학습 창 수와 같음
+            tk = gs["runs"][0]["train"]["train_kinds"]
+            self.assertFalse(any(kk.startswith(("pre_fall", "entry_pre_fall")) for kk in tk))
+            self.assertEqual(sum(tk.values()), gs["runs"][0]["train"]["n_train"])
             self.assertTrue({"Gmd", "Gae", "Gnf", "GnfE0"} <= set(s["matched_fa"]["variants"]))
             md = (out / "summary.md").read_text(encoding="utf-8")
             self.assertIn("## 라벨 효율", md)
