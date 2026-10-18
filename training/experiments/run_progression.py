@@ -3,18 +3,22 @@
 
   A 규칙만 -> B 1D CNN + URFD(원래 방식) -> C + 데이터 추가 -> D + 라벨/학습-운영 정렬
   -> E + 모델/특징 변경 (E0 HistGradientBoosting, E1 Fall1DCNN-GAP, E2 FallTCN) -> F + 임계값 조정
-  (E*: 저장된 E 모델을 진입 이후 여러 창에 적용, 재학습 없음)
+  (E*: 저장된 E 모델을 진입 이후 여러 창에 적용, 재학습 없음; L: 학습 낙상 클립 10/25/50%만 쓴 E0/E1;
+   G: 양성 창 없이 정상 창만으로 학습한 이상 탐지)
 을 같은 5-fold held-out 클립, 같은 이벤트 단위 프로토콜(replay.py: 15Hz obs, EMA, 20초 정지 꼬리)로 평가합니다.
 
 실행 예 (저장소 루트에서)
   python -m training.experiments.run_progression --stages A,B,C,D,E,F --folds 0-4 --seeds 3 --jobs 5
   python -m training.experiments.run_progression --stages Es --folds 0-4 --seeds 3 --jobs 5   (E 모델 필요)
-  python -m training.experiments.run_progression --summarize-only
+  python -m training.experiments.run_progression --stages L --folds 0-4 --seeds 3 --jobs 5
+  python -m training.experiments.run_progression --stages G --folds 0-4 --seeds 3 --jobs 5   (GnfE0는 E0 모델 필요)
+  python -m training.experiments.run_progression --summarize-only [--fa-ref E1max]
 
 출력 (--out, 기본 dataset/_experiments/progression_v1/)
-  fold{k}/{variant}.json : 변형(A, B, C, D, E0, E1, E2, E0max.., F0, F1, F2)별 fold 결과
+  fold{k}/{variant}.json : 변형(A, B, C, D, E0, E1, E2, E0max.., F0, F1, F2, E0p10.., Gmd..)별 fold 결과
                            runs[seed]: 클립 결과(outcomes), 요약(summary), 창 단위 지표(window), 학습 기록 요약
-  fold{k}/models/        : E 모델 (F, Es 단계가 다시 읽음)
+  fold{k}/models/        : E 모델 (F, Es 단계가 다시 읽음), L 모델 ({variant}_s{seed}.pkl/.pt, E와 같은 형식),
+                           G 탐지기 (G{kind}_s{seed}.pt: {"kind", "detector": Detector.state(), "calibrator"})
   logs/fold{k}.log       : --jobs > 1일 때 fold 프로세스 로그
   summary.json, summary.md : 전체/데이터셋별 표
 
@@ -37,6 +41,29 @@ E* (단계 키 Es, 재학습 없음, 임계값 0.4 그대로): verifiers.Sliding
     E 모델이 학습 때 보지 못한 입력
   E와 같은 fold/seed 모델끼리 클립 단위로 비교한 paired 표를 summary에 함께 씁니다 (회복된 억제 낙상, 새 ADL 알람).
 
+L (라벨 효율): E0p10/E0p25/E0p50, E1p10/E1p25/E1p50
+  - E와 같은 학습 창(같은 증강 rng)에서 낙상 클립을 clip_id 단위로 줄임: 남긴 낙상 클립은 그 클립의 창을 모두
+    (양성 창과 낙상 전 음성 창), 뺀 낙상 클립은 낙상 전 음성 창까지 모두 뺌 (낙상 전 구간도 fall_start 라벨로 자르므로).
+    ADL 클립 창은 모두 사용. 중첩 표본: 전체 -> 50% -> 25% -> 10% 순서로 바로 위 집합에서
+    random.Random("{fold}-{seed}-{f}")로 뽑음 (10% ⊂ 25% ⊂ 50%). 검증 창은 모두 그대로.
+    E0는 E와 같은 _make_hgb (early_stopping 명시). 판정은 E*max와 같은 SlidingWindowVerifier mode max, 0.4
+  - 라벨 효율 표: 0% = 이상 탐지 G 변형 (결과가 있으면), 10/25/50% = L, 100% = E0max/E1max
+
+G (이상 탐지, training/anomaly): Gmd (Mahalanobis), Gae (1D conv 오토인코더), Gnf (STG-NF), GnfE0
+  - 학습: E와 같은 학습 창(같은 증강 rng)에서 y == 0 창만 (양성 창은 학습/보정에 쓰지 않음). 다만 정상 집합에는
+    낙상 클립의 낙상 전 창(pre_fall, entry_pre_fall)이 들어가고, 이 창은 fall_start 라벨로 자른 것이라
+    낙상 시각 라벨을 전혀 안 쓰는 것은 아님. GnfS는 ADL 클립의 창만으로 학습·보정해 낙상 라벨을 전혀 쓰지 않음.
+    검증 정상 창(va_rows, 증강 없음, y == 0; GnfS는 ADL 클립 창)으로 early stopping과 보정
+    (Calibrator q=0.8 -> p 0.4, 사전 등록)
+  - 판정: 보정한 의사 p_fall로 E*max와 같은 SlidingWindowVerifier mode max, 0.4. 점수가 NaN인 창(STG-NF에서
+    관절 유효 50% 이상 세그먼트가 없는 창 등)은 건너뛰고, 모든 창이 NaN이면 None (fail-open): NanSafeSlidingVerifier
+  - GnfE0: 창마다 p = (p_Gnf + p_E0) / 2 (같은 fold/seed의 저장된 E0_s{seed}.pkl), p_Gnf가 NaN이면 p_E0, 그 뒤 max
+  - 창 AUC: test 창의 원시 이상 점수 (GnfE0는 결합 p), NaN 창은 빼고 계산 (window.n_nan에 개수)
+
+같은 오탐률 비교 (matched FA, oracle): p_fall이 있는 변형마다 seed별로 fold를 합쳐, 첫 AI 호출 p_fall 억제 임계값을
+  test 결과로 골라 근사 ADL 오탐률을 기준 변형(--fa-ref, 기본 E0max)의 근사 오탐률에 맞춘 뒤 recall을 비교.
+  근사는 억제 뒤 재진입/승격 알람을 무시함. test로 고른 임계값이라 모델 순위 비교용일 뿐 성능 추정이 아님.
+
 시간 기준 지표 (replay.summarize): 제때 recall(엄격/느슨), 제때 balanced, 첫 LEVEL1이 정지 꼬리 안인지(in_tail).
   timing 필드가 없는 옛 결과 파일은 '-'로 표시합니다.
 
@@ -57,14 +84,36 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = REPO_ROOT / "dataset" / "_experiments" / "progression_v1"
 DEFAULT_MANIFEST = REPO_ROOT / "dataset" / "_manifest" / "manifest_v1.jsonl"
 
-STAGES = ("A", "B", "C", "D", "E", "Es", "F")
+STAGES = ("A", "B", "C", "D", "E", "Es", "F", "L", "G")
 STAGE_VARIANTS: Dict[str, Tuple[str, ...]] = {
     "A": ("A",), "B": ("B",), "C": ("C",), "D": ("D",),
     "E": ("E0", "E1", "E2"), "Es": ("E0max", "E1max", "E2max", "E0last", "E1last", "E2last"),
     "F": ("F0", "F1", "F2", "F0b", "F1b", "F2b"),
+    "L": ("E0p10", "E0p25", "E0p50", "E1p10", "E1p25", "E1p50"),
+    "G": ("Gmd", "Gae", "Gnf", "GnfS", "GnfE0"),
 }
 # E* 변형 -> (기준 E 변형, SlidingWindowVerifier mode)
 ES_BASE: Dict[str, Tuple[str, str]] = {v: (v[:2], v[2:]) for v in STAGE_VARIANTS["Es"]}
+# L 변형 -> (기준 E 변형, 남기는 양성 학습 클립 비율)
+L_BASE: Dict[str, Tuple[str, float]] = {v: (v[:2], int(v[3:]) / 100.0) for v in STAGE_VARIANTS["L"]}
+L_FRACTIONS: Tuple[float, ...] = tuple(sorted({f for _, f in L_BASE.values()}))
+# G 변형 -> 이상 탐지기 종류 (training.anomaly.KINDS), GnfE0 -> (탐지기, 결합할 E 변형)
+G_KIND: Dict[str, str] = {"Gmd": "md", "Gae": "ae", "Gnf": "nf"}
+# 엄격한 정상 집합 변형 -> 탐지기 종류: ADL 클립의 창만으로 학습·보정 (낙상 클립의 낙상 전 구간 제외, 낙상 라벨을 전혀 안 씀)
+G_STRICT: Dict[str, str] = {"GnfS": "nf"}
+G_COMBO: Dict[str, Tuple[str, str]] = {"GnfE0": ("nf", "E0")}
+G_PARAMS_UNIT: Dict[str, str] = {"md": "statistics", "ae": "weights", "nf": "weights"}
+# 라벨 효율 표의 행: (낙상 라벨 비율, 변형들). 등록되지 않았거나 결과가 없는 변형은 표에서 빠짐.
+# 0%: 정상 창만으로 학습한 이상 탐지 (단계 G). GnfE0는 100% 라벨로 학습한 E0를 섞으므로 100% 행에 둠.
+LABEL_EFF_ROWS: Tuple[Tuple[float, Tuple[str, ...]], ...] = (
+    (0.0, ("Gmd", "Gae", "Gnf", "GnfS")),
+    (0.10, ("E0p10", "E1p10")),
+    (0.25, ("E0p25", "E1p25")),
+    (0.50, ("E0p50", "E1p50")),
+    (1.0, ("E0max", "E1max", "GnfE0")),
+)
+# 같은 오탐률 비교(matched FA)의 기준 변형 (CLI --fa-ref)
+DEFAULT_FA_REF = "E0max"
 VARIANTS = tuple(v for s in STAGES for v in STAGE_VARIANTS[s])
 VARIANT_INFO: Dict[str, Dict[str, str]] = {
     "A": {"title": "규칙만", "change": "rules only (ai_mode=off)", "model": "-"},
@@ -98,6 +147,39 @@ VARIANT_INFO: Dict[str, Dict[str, str]] = {
             "model": "Fall1DCNN-GAP"},
     "F2b": {"title": "+ 임계값 조정 (E2, 검증 balanced 최대)", "change": "+ val balanced-max threshold",
             "model": "FallTCN"},
+    "E0p10": {"title": "라벨 효율: 학습 낙상 클립 10% (E0, E*max 판정)",
+              "change": "E0 recipe, 10% of positive train clips (nested by clip_id), max p_fall",
+              "model": "HistGradientBoosting"},
+    "E0p25": {"title": "라벨 효율: 학습 낙상 클립 25% (E0, E*max 판정)",
+              "change": "E0 recipe, 25% of positive train clips (nested by clip_id), max p_fall",
+              "model": "HistGradientBoosting"},
+    "E0p50": {"title": "라벨 효율: 학습 낙상 클립 50% (E0, E*max 판정)",
+              "change": "E0 recipe, 50% of positive train clips (nested by clip_id), max p_fall",
+              "model": "HistGradientBoosting"},
+    "E1p10": {"title": "라벨 효율: 학습 낙상 클립 10% (E1, E*max 판정)",
+              "change": "E1 recipe, 10% of positive train clips (nested by clip_id), max p_fall",
+              "model": "Fall1DCNN-GAP"},
+    "E1p25": {"title": "라벨 효율: 학습 낙상 클립 25% (E1, E*max 판정)",
+              "change": "E1 recipe, 25% of positive train clips (nested by clip_id), max p_fall",
+              "model": "Fall1DCNN-GAP"},
+    "E1p50": {"title": "라벨 효율: 학습 낙상 클립 50% (E1, E*max 판정)",
+              "change": "E1 recipe, 50% of positive train clips (nested by clip_id), max p_fall",
+              "model": "Fall1DCNN-GAP"},
+    "Gmd": {"title": "이상 탐지: Mahalanobis (정상 창만, E*max 판정)",
+            "change": "normal windows only, handcrafted + LedoitWolf Mahalanobis, val q0.8 -> p 0.4, max p",
+            "model": "Mahalanobis (LedoitWolf)"},
+    "Gae": {"title": "이상 탐지: 1D conv 오토인코더 (정상 창만, E*max 판정)",
+            "change": "normal windows only, mask-weighted reconstruction error, val q0.8 -> p 0.4, max p",
+            "model": "Conv1D AE"},
+    "Gnf": {"title": "이상 탐지: STG-NF (정상 창만, E*max 판정)",
+            "change": "normal windows only, pose-segment flow NLL (max over segments), val q0.8 -> p 0.4, max p",
+            "model": "STG-NF"},
+    "GnfS": {"title": "이상 탐지: STG-NF, ADL 클립만 (낙상 라벨 전혀 없음)",
+             "change": "like Gnf but train/calibrate on windows of ADL clips only (no pre-fall windows of fall clips)",
+             "model": "STG-NF"},
+    "GnfE0": {"title": "STG-NF + E0 평균 (E*max 판정)",
+              "change": "per-window mean of calibrated Gnf p and E0 p_fall (same fold/seed), max p",
+              "model": "STG-NF + HistGradientBoosting"},
 }
 EVAL_DATASETS_ORDER = ("le2i", "caucafall", "gmdcsa24", "mcfd", "urfd")
 
@@ -110,6 +192,9 @@ VAL_SPLIT_SEED = 0
 __all__ = [
     "STAGES", "VARIANTS", "parse_folds", "parse_stages", "select_threshold", "auc_mann_whitney",
     "first_p_fall", "val_points", "sim_balanced", "select_threshold_balanced",
+    "positive_clip_ids", "nested_clip_subsets", "keep_positive_mask", "ai_points", "sim_rates",
+    "G_KIND", "G_COMBO", "NanSafeSlidingVerifier", "combine_mean_p",
+    "match_fa_threshold", "matched_fa", "label_efficiency_rows",
     "aggregate_variant", "paired_compare", "build_summary", "render_markdown", "run_fold", "main",
 ]
 
@@ -313,6 +398,9 @@ def aggregate_variant(fold_results: List[Dict[str, Any]], summarize_fn: Optional
         "time_s_total": sum(float(r.get("time_s") or 0.0) for r in fold_results),
         "val_balanced": _mean(run.get("val", {}).get("balanced_at_th")
                               for r in fold_results for run in r["runs"][:n_runs]),
+        # L: 학습에 남긴 양성 클립 수 (run 평균, 다른 변형은 None)
+        "train_pos_clips": _mean((run.get("train") or {}).get("n_pos_clips")
+                                 for r in fold_results for run in r["runs"][:n_runs]),
     }
 
 
@@ -396,11 +484,215 @@ def paired_compare(base_folds: List[Dict[str, Any]], new_folds: List[Dict[str, A
             "clips": {key: _mean(c[key] for c in counts.values()) for key in _PAIR_KEYS}}
 
 
+# ---------------------------------------------------------------------------
+# L: 양성 클립 부분 표본 (표준 라이브러리만)
+# ---------------------------------------------------------------------------
+
+def positive_clip_ids(meta: Sequence[Dict[str, Any]], y: Sequence[int]) -> List[str]:
+    """학습 창 meta/y -> 양성 창(y == 1)이 하나라도 있는 clip_id 목록 (정렬)"""
+    return sorted({str(m.get("clip_id")) for m, t in zip(meta, y) if int(t) == 1})
+
+
+def _n_keep(frac: float, n: int) -> int:
+    """비율 frac로 남길 클립 수: round(frac * n), 0 < frac이면 1개 이상, n 이하"""
+    if n <= 0 or frac <= 0:
+        return 0
+    return int(min(n, max(1, round(float(frac) * n))))
+
+
+def nested_clip_subsets(clip_ids: Iterable[str], fractions: Iterable[float], fold: int, seed: int
+                        ) -> Dict[float, List[str]]:
+    """
+    양성 클립 목록 -> {비율: 남길 clip_id 목록 (정렬)}. 클립 단위라 한 낙상 클립의 창은 함께 남거나 함께 빠짐.
+    중첩: 큰 비율부터 차례로 바로 위 집합에서 뽑음 (전체 -> 50% -> 25% -> 10%), 그래서 10% ⊂ 25% ⊂ 50%.
+    비율 f의 표본은 random.Random("{fold}-{seed}-{f}")로 바로 위 집합에서 뽑음 (같은 입력이면 실행마다 같음).
+    클립 수는 전체 클립 수 기준 _n_keep(f, n). 비율 1.0 이상은 전체.
+    요청 비율 집합이 달라도 결과가 같도록 L_FRACTIONS의 비율은 항상 모두 거쳐 뽑음.
+    """
+    import random
+
+    pool = sorted(set(str(c) for c in clip_ids))
+    n = len(pool)
+    want = {float(x) for x in fractions}
+    out: Dict[float, List[str]] = {}
+    parent = pool
+    for f in sorted(want | set(L_FRACTIONS), reverse=True):
+        if f >= 1.0:
+            sub = list(pool)
+        else:
+            k = min(_n_keep(f, n), len(parent))
+            rng = random.Random(f"{int(fold)}-{int(seed)}-{f:.4f}")
+            sub = sorted(rng.sample(parent, k))
+        parent = sub
+        if f in want:
+            out[f] = list(sub)
+    return out
+
+
+def keep_positive_mask(meta: Sequence[Dict[str, Any]], y: Sequence[int], kept_clips: Iterable[str]) -> List[bool]:
+    """
+    낙상 라벨 예산 f: 낙상 클립(meta label "fall")은 kept_clips에 있을 때만 그 클립의 창을 모두 남기고
+    (양성 창, 낙상 전 음성 창 pre_fall/entry_pre_fall 모두), 그 밖의 낙상 클립 창은 모두 뺌.
+    낙상 전 음성 창도 라벨(fall_start)로 잘라 낸 것이라, 쓰지 않는 낙상 클립에서 남기면 라벨을 쓰는 셈이 되기 때문.
+    ADL 클립 창은 모두 남김. meta에 label이 없으면 y로 판단 (y == 1이면 낙상 클립 창).
+    """
+    kept = set(str(c) for c in kept_clips)
+
+    def is_fall_clip(m, t):
+        lab = m.get("label")
+        return lab == "fall" if lab is not None else int(t) == 1
+    return [(not is_fall_clip(m, t)) or str(m.get("clip_id")) in kept for m, t in zip(meta, y)]
+
+
+# ---------------------------------------------------------------------------
+# 같은 오탐률 비교 (matched FA, 표준 라이브러리만)
+# ---------------------------------------------------------------------------
+
+NO_VETO = -1.0  # 아무것도 억제하지 않는 임계값 (p_fall >= 0)
+
+
+def ai_points(outcomes: Iterable[Dict[str, Any]]) -> List[Tuple[str, bool, Optional[float]]]:
+    """
+    veto 재생 클립 결과 -> (label, 규칙이 LEVEL1 판정까지 감(reached_ai), 첫 AI 호출 p_fall) 목록.
+    veto 결과의 alarm은 AI 억제 뒤의 값이라 규칙 알람은 reached_ai로 대신함 (shadow 재생의 alarm과 같은 뜻).
+    첫 AI 호출은 억제 전이라 첫 p_fall은 억제 임계값과 무관.
+    """
+    return [(str(o.get("label")), bool(o.get("reached_ai")), first_p_fall(o)) for o in outcomes]
+
+
+def sim_rates(points: Sequence[Tuple[str, bool, Optional[float]]], th: float
+              ) -> Tuple[Optional[float], Optional[float]]:
+    """
+    임계값 th의 veto를 근사한 (recall, ADL 오탐률): 첫 AI 호출 p_fall <= th면 억제, p_fall이 없으면(판단 불가)
+    fail-open으로 알람. 억제 뒤 재진입/승격 알람은 무시하는 근사. 한쪽 클립이 없으면 그쪽은 None.
+    """
+    n_f = n_a = det = fa = 0
+    for lab, alarm, p in points:
+        hit = bool(alarm) and (p is None or p > th)
+        if lab == "fall":
+            n_f += 1
+            det += hit
+        else:
+            n_a += 1
+            fa += hit
+    return (det / n_f if n_f else None), (fa / n_a if n_a else None)
+
+
+def match_fa_threshold(points: Sequence[Tuple[str, bool, Optional[float]]], target_fa: float,
+                       eps: float = 1e-9) -> Dict[str, Any]:
+    """
+    근사 ADL 오탐률이 target_fa 이하가 되는 가장 작은 임계값(= recall이 가장 큰 쪽)과 그때의 recall/오탐률.
+    후보 = 억제 없음(NO_VETO)과 클립 첫 p_fall 값들. 모든 p를 억제해도 target을 못 맞추면(판단 불가 알람이
+    많을 때) 가장 큰 후보를 쓰고 matched=False.
+    """
+    cands = [NO_VETO] + sorted({float(p) for _, _, p in points if p is not None})
+    th, r, fa = NO_VETO, None, None
+    for th in cands:
+        r, fa = sim_rates(points, th)
+        if fa is None or fa <= float(target_fa) + eps:
+            return {"threshold": th, "recall": r, "adl_fa_rate": fa, "matched": True}
+    return {"threshold": th, "recall": r, "adl_fa_rate": fa, "matched": False}
+
+
+def _has_p_fall(fold_results: List[Dict[str, Any]]) -> bool:
+    return any(o.get("p_fall") for r in fold_results for run in r.get("runs", []) for o in run.get("outcomes", []))
+
+
+def _actual_rates(outcomes: List[Dict[str, Any]]) -> Tuple[Optional[float], Optional[float]]:
+    """실제 재생 결과의 (recall, ADL 오탐률)"""
+    f = [o for o in outcomes if o.get("label") == "fall"]
+    a = [o for o in outcomes if o.get("label") != "fall"]
+    return (sum(bool(o.get("alarm")) for o in f) / len(f) if f else None,
+            sum(bool(o.get("alarm")) for o in a) / len(a) if a else None)
+
+
+def matched_fa(results: Dict[str, List[Dict[str, Any]]], ref: str = DEFAULT_FA_REF) -> Dict[str, Any]:
+    """
+    같은 오탐률 비교 (oracle: test 결과로 임계값을 맞추므로 모델 순위 비교용, 운영 임계값이 아님).
+    p_fall이 있는 변형마다 seed별로 기준 변형(ref)과 공통 fold의 test 클립을 합쳐
+      target = 기준 변형의 근사 ADL 오탐률 (sim_rates, 기준 변형 자신의 억제 임계값; 실제 오탐률도 함께 기록),
+      target에 맞춘 임계값(match_fa_threshold)에서의 recall, 자기 실제/근사 recall·오탐률.
+    seed 평균 (threshold는 평균/최소/최대). 반환: {"ref", "variants": {variant: ...}} (기준 결과가 없으면 빔)
+    """
+    out: Dict[str, Any] = {"ref": ref, "variants": {}}
+    ref_folds = {r["fold"]: r for r in results.get(ref) or []}
+    if not ref_folds:
+        return out
+    for v in VARIANTS:
+        frs = results.get(v) or []
+        if not frs or not _has_p_fall(frs):
+            continue
+        new_folds = {r["fold"]: r for r in frs}
+        common = sorted(set(ref_folds) & set(new_folds))
+        if not common:
+            continue
+        ref_runs = {k: _runs_by_seed(ref_folds[k]) for k in common}
+        new_runs = {k: _runs_by_seed(new_folds[k]) for k in common}
+        seeds = [s for s in new_runs[common[0]] if all(s in ref_runs[k] and s in new_runs[k] for k in common)]
+        per: List[Dict[str, Any]] = []
+        for s in seeds:
+            ref_out = [o for k in common for o in ref_runs[k][s]["outcomes"]]
+            new_out = [o for k in common for o in new_runs[k][s]["outcomes"]]
+            ref_th = _mean(ref_runs[k][s].get("threshold") for k in common)
+            own_th = _mean(new_runs[k][s].get("threshold") for k in common)
+            _, target = sim_rates(ai_points(ref_out), DEFAULT_TH if ref_th is None else ref_th)
+            if target is None:
+                continue
+            pts = ai_points(new_out)
+            m = match_fa_threshold(pts, target)
+            own_r, own_fa = _actual_rates(new_out)
+            sim_r, sim_fa = sim_rates(pts, DEFAULT_TH if own_th is None else own_th)
+            per.append({"seed": s, "target_fa": target, "ref_fa_actual": _actual_rates(ref_out)[1],
+                        "threshold": m["threshold"], "recall_at_fa": m["recall"], "fa_at_th": m["adl_fa_rate"],
+                        "matched": m["matched"], "own_recall": own_r, "own_fa": own_fa,
+                        "own_sim_recall": sim_r, "own_sim_fa": sim_fa})
+        if not per:
+            continue
+        ths = [p["threshold"] for p in per]
+        row: Dict[str, Any] = {k: _mean(p[k] for p in per) for k in _MFA_KEYS}
+        row.update({"folds": common, "n_seeds": len(per), "all_matched": all(p["matched"] for p in per),
+                    "threshold": {"mean": _mean(ths), "min": min(ths), "max": max(ths)},
+                    "recall_at_fa_seeds": [p["recall_at_fa"] for p in per]})
+        out["variants"][v] = row
+    return out
+
+
+_MFA_KEYS = ("target_fa", "ref_fa_actual", "recall_at_fa", "fa_at_th", "own_recall", "own_fa",
+             "own_sim_recall", "own_sim_fa")
+
+
+def label_efficiency_rows(variants: Dict[str, Any], matched: Optional[Dict[str, Any]] = None
+                          ) -> List[Dict[str, Any]]:
+    """
+    summary variants -> 라벨 효율 표 행 (LABEL_EFF_ROWS 순서, 결과가 있는 변형만).
+    100% 행(E*max) 말고 다른 행이 하나도 없으면 빈 목록.
+    """
+    full = {v for frac, vs in LABEL_EFF_ROWS if frac >= 1.0 for v in vs if v in ES_BASE}
+    if not any(v in variants for _, vs in LABEL_EFF_ROWS for v in vs if v not in full):
+        return []
+    mv = (matched or {}).get("variants") or {}
+    rows = []
+    for frac, vs in LABEL_EFF_ROWS:
+        for v in vs:
+            s = variants.get(v)
+            if not s:
+                continue
+            fd = s.get("fold") or {}
+            rows.append({"frac": frac, "variant": v, "model": s.get("model", ""),
+                         "train_pos_clips": s.get("train_pos_clips"),
+                         "recall": fd.get("recall"), "adl_fa_rate": fd.get("adl_fa_rate"),
+                         "balanced": fd.get("balanced"), "ai_call_auc": s.get("ai_call_auc"),
+                         "window_auc": (s.get("window") or {}).get("roc_auc"),
+                         "matched_recall": (mv.get(v) or {}).get("recall_at_fa")})
+    return rows
+
+
 def build_summary(results: Dict[str, List[Dict[str, Any]]], summarize_fn: Optional[Callable] = None,
-                  meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                  meta: Optional[Dict[str, Any]] = None, fa_ref: str = DEFAULT_FA_REF) -> Dict[str, Any]:
     """
     {variant: [fold 결과]} -> summary dict (variants 순서 유지). 'best_f': 검증 balanced가 가장 높은 F 변형.
     'paired': E* 변형마다 기준 E 변형과의 paired_compare (둘 다 있을 때).
+    'matched_fa': 기준 변형 fa_ref의 오탐률에 맞춘 recall (matched_fa), 'label_efficiency': 라벨 효율 표 행.
     """
     variants = {}
     for v in VARIANTS:
@@ -417,7 +709,9 @@ def build_summary(results: Dict[str, List[Dict[str, Any]]], summarize_fn: Option
             pc = paired_compare(results[ev], results[v], summarize_fn)
             if pc is not None:
                 paired[v] = dict(pc, base=ev)
-    return {"version": 1, "meta": dict(meta or {}), "variants": variants, "best_f": best_f, "paired": paired}
+    mfa = matched_fa(results, ref=fa_ref)
+    return {"version": 1, "meta": dict(meta or {}), "variants": variants, "best_f": best_f, "paired": paired,
+            "matched_fa": mfa, "label_efficiency": label_efficiency_rows(variants, mfa)}
 
 
 def _fmt(x: Optional[float], nd: int = 3) -> str:
@@ -525,6 +819,9 @@ def render_markdown(summary: Dict[str, Any]) -> str:
     lines.append("")
     lines.extend(_render_timing(V))
     lines.extend(_render_paired(summary.get("paired") or {}))
+    lines.extend(_render_label_efficiency(summary.get("label_efficiency") or [],
+                                          (summary.get("matched_fa") or {}).get("ref")))
+    lines.extend(_render_matched_fa(summary.get("matched_fa") or {}))
     return "\n".join(lines)
 
 
@@ -592,6 +889,72 @@ def _render_paired(paired: Dict[str, Any]) -> List[str]:
             f"{_fmt(rec, 1)}/{_fmt(base_s, 1)} | {_fmt(c.get('recovered_timely'), 1)}/{_fmt(c.get('recovered_tail'), 1)} | "
             f"{_fmt(c.get('fall_gained'), 1)} | {_fmt(c.get('fall_lost'), 1)} | "
             f"{_fmt(c.get('adl_new_alarm'), 1)} | {_fmt(c.get('adl_removed'), 1)} |")
+    lines.append("")
+    return lines
+
+
+def _fmt_th(x: Optional[float]) -> str:
+    if x is None:
+        return "-"
+    if x < 0:
+        return "억제 없음"
+    return f"{x:.1e}" if 0 < x < 5e-4 else f"{x:.3f}"  # HGB p_fall은 1e-4 단위까지 내려감
+
+
+def _render_matched_fa(mfa: Dict[str, Any]) -> List[str]:
+    """같은 오탐률 비교 표 (기준 변형 결과가 있을 때만)."""
+    V = mfa.get("variants") or {}
+    if not V:
+        return []
+    ref = mfa.get("ref", "")
+    lines = [f"## 같은 오탐률에서의 recall (기준 {ref}, oracle 비교: 모델 순위용)", "",
+             f"- seed마다 5개 test fold를 합쳐, 첫 AI 호출 p_fall의 억제 임계값을 test 결과로 골라 근사 ADL 오탐률을 "
+             f"{ref}(같은 seed)의 근사 오탐률 이하로 맞춤. test로 고른 임계값이라 운영 임계값이나 성능 추정이 아님",
+             "- 근사: 첫 AI 호출 p_fall <= 임계값이면 억제, p_fall이 없으면 알람(fail-open). 억제 뒤 재진입/승격 알람은 "
+             "무시하므로 실제 재생 값과 다를 수 있음 (자기 근사 vs 실제 열 참고)",
+             "- 값은 seed 평균. 임계값은 평균 (최소~최대), '억제 없음'은 억제하지 않아도 이미 오탐률이 기준 이하인 경우",
+             "",
+             "| 변형 | 기준 오탐률 (근사 / 실제) | 맞춘 임계값 | 같은 오탐률 Recall | 그때 ADL 오탐률 | "
+             "자기 Recall / 오탐률 (실제) | 자기 Recall / 오탐률 (근사) |",
+             "|---|---|---|---|---|---|---|"]
+    for v in VARIANTS:
+        r = V.get(v)
+        if not r:
+            continue
+        th = r.get("threshold") or {}
+        th_s = _fmt_th(th.get("mean"))
+        if th.get("min") is not None and (th.get("max") or 0) - th["min"] > 1e-9:
+            th_s += f" ({_fmt_th(th['min'])}~{_fmt_th(th['max'])})"
+        flag = "" if r.get("all_matched", True) else " (못 맞춤)"
+        lines.append(
+            f"| {v} | {_fmt(r.get('target_fa'))} / {_fmt(r.get('ref_fa_actual'))} | {th_s} | "
+            f"{_fmt(r.get('recall_at_fa'))}{flag} | {_fmt(r.get('fa_at_th'))} | "
+            f"{_fmt(r.get('own_recall'))} / {_fmt(r.get('own_fa'))} | "
+            f"{_fmt(r.get('own_sim_recall'))} / {_fmt(r.get('own_sim_fa'))} |")
+    lines.append("")
+    return lines
+
+
+def _render_label_efficiency(rows: List[Dict[str, Any]], ref: Optional[str]) -> List[str]:
+    """라벨 효율 표 (L/G 변형 결과가 있을 때만)."""
+    if not rows:
+        return []
+    lines = ["## 라벨 효율 (학습 낙상 라벨 비율별, E*max 판정)", "",
+             "- 0%: 양성 창 없이 정상 창만으로 학습한 이상 탐지 (G). 정상 집합에 낙상 클립의 낙상 전 창이 들어가 "
+             "fall_start 라벨은 쓰며, GnfS만 ADL 클립 창만 써서 낙상 라벨을 전혀 쓰지 않음",
+             "- 10/25/50%: 학습 fold의 낙상 클립을 clip_id 단위로 중첩 표본 (10% ⊂ 25% ⊂ 50%). 뺀 낙상 클립은 낙상 전 "
+             "음성 창까지 모두 뺌, ADL 클립 창은 모두 사용. 100%: E0max/E1max (GnfE0는 100% 라벨 E0와 결합)",
+             "- Recall/오탐률/Balanced는 fold mean ± std, AI 호출 AUC는 pooled seed 평균, "
+             f"같은 오탐률 Recall은 아래 oracle 비교 (기준 {ref or '-'})",
+             "",
+             "| 낙상 라벨 | 변형 | 모델 | 학습 양성 클립 | Recall (fold) | ADL 오탐률 (fold) | Balanced (fold) | "
+             "AI 호출 AUC | 창 ROC-AUC | 같은 오탐률 Recall |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
+    for r in rows:
+        lines.append(
+            f"| {r['frac'] * 100:.0f}% | {r['variant']} | {r.get('model', '')} | {_fmt(r.get('train_pos_clips'), 1)} | "
+            f"{_fmt_ms(r.get('recall'))} | {_fmt_ms(r.get('adl_fa_rate'))} | {_fmt_ms(r.get('balanced'))} | "
+            f"{_fmt(r.get('ai_call_auc'))} | {_fmt_ms(r.get('window_auc'))} | {_fmt(r.get('matched_recall'))} |")
     lines.append("")
     return lines
 
@@ -699,6 +1062,88 @@ class _Standardizer:
         if x.ndim == 2:
             return (x - self.mu[:, None]) / self.sd[:, None]
         return (x - self.mu[None, :, None]) / self.sd[None, :, None]
+
+
+class NanSafeSlidingVerifier:
+    """
+    G: SlidingWindowVerifier(mode "max")와 같은 창들에 점수 함수를 적용하되, 점수가 NaN/inf인 창은 건너뜀.
+    (이상 탐지기는 쓸 입력이 없는 창에 NaN을 냄. 원래 검증기의 np.argmax는 NaN을 최댓값으로 고름)
+    모든 창이 None 또는 NaN이면 None (fail-open). 점수가 모두 유한하면 SlidingWindowVerifier max와 같은 값.
+    창 생성(_windows)과 진단 카운터는 내부 SlidingWindowVerifier의 것을 그대로 씀.
+    """
+
+    def __init__(self, score_fn: Callable[[Any], Any], model_id: Optional[str] = None):
+        from training.experiments.verifiers import SlidingWindowVerifier
+        self._inner = SlidingWindowVerifier(score_fn, mode="max", model_id=model_id)
+        self.model_id = self._inner.model_id
+        self.n_nan_windows = 0   # 점수가 NaN이라 건너뛴 창 수 합
+        self.n_all_nan = 0       # 창은 있었지만 모두 NaN이라 None을 낸 호출 수
+
+    @property
+    def calls(self) -> int:
+        return self._inner.calls
+
+    @property
+    def n_none(self) -> int:
+        return self._inner.n_none
+
+    def bind_engine(self, engine) -> None:
+        self._inner.bind_engine(engine)
+
+    def stats(self) -> Dict[str, Any]:
+        return dict(self._inner.stats(), nan_windows=self.n_nan_windows, all_nan_calls=self.n_all_nan)
+
+    def __call__(self, seq) -> Optional[float]:
+        import numpy as np
+
+        v = self._inner
+        v.calls += 1
+        v.last_ps = None
+        engine = v._engine_ref() if v._engine_ref is not None else v._engine
+        if engine is None:
+            return v._done(None)
+        xs = v._windows(engine)
+        ok = [i for i, x in enumerate(xs) if x is not None]
+        ps = np.zeros(0)
+        if ok:
+            ps = np.asarray(v.score_fn(np.stack([xs[i] for i in ok])), dtype=np.float64).reshape(-1)
+            v.last_ps = [float(p) for p in ps]
+            fin = np.isfinite(ps)
+            self.n_nan_windows += int((~fin).sum())
+            if not fin.all():
+                if not fin.any():
+                    self.n_all_nan += 1
+                ok, ps = [i for i, f in zip(ok, fin) if f], ps[fin]
+        v.n_windows_skipped += len(xs) - len(ok)
+        if not ok:
+            return v._done(None)
+        v.n_windows += len(ok)
+        j = int(np.argmax(ps))
+        if ok[j] != 0:
+            v.n_max_later += 1
+        return v._done(float(ps[j]))
+
+
+def combine_mean_p(p_a, p_b):
+    """GnfE0: 창별 (p_a + p_b) / 2, p_a가 NaN이면 p_b (p_b도 NaN이면 NaN)"""
+    import numpy as np
+
+    a = np.asarray(p_a, dtype=np.float64)
+    b = np.asarray(p_b, dtype=np.float64)
+    return np.where(np.isnan(a), b, np.where(np.isnan(b), a, (a + b) / 2.0))
+
+
+def _window_metrics_nan(y, s, meta=None) -> Dict[str, Any]:
+    """_window_metrics + NaN 점수 창 제외 (G: 쓸 입력이 없는 창). n_nan에 뺀 창 수, n은 남은 창 수."""
+    import numpy as np
+
+    s = np.asarray(s, dtype=np.float64)
+    fin = np.isfinite(s)
+    y = np.asarray(y)[fin]
+    m = [mm for mm, f in zip(meta, fin) if f] if meta is not None and len(meta) == len(fin) else None
+    out = _window_metrics(y, s[fin], m)
+    out["n_nan"] = int((~fin).sum())
+    return out
 
 
 def _evaluate(test_rows, clips, params, verifier=None) -> List[Dict[str, Any]]:
@@ -889,9 +1334,7 @@ def run_fold(k: int, rows: List[Dict[str, Any]], folds: Dict[str, int], clips: D
             for v in e_needed:
                 ts = time.time()
                 if v == "E0":
-                    from sklearn.ensemble import HistGradientBoostingClassifier
-                    clf = HistGradientBoostingClassifier(max_iter=int(hgb_iter), learning_rate=0.1,
-                                                         class_weight="balanced", random_state=seed)
+                    clf = _make_hgb(seed, hgb_iter)
                     clf.fit(W.handcrafted(X_tr), y_tr)
                     tr_s = time.time() - ts
                     p_te = clf.predict_proba(W.handcrafted(X_te))[:, 1] if len(X_te) else np.zeros(0)
@@ -1003,7 +1446,340 @@ def run_fold(k: int, rows: List[Dict[str, Any]], folds: Dict[str, int], clips: D
                           "params_unit": (e_res or {}).get("params_unit", "weights"),
                           "runs": runs_f[fv], "time_s": (time.time() - t0) / len(todo), "base": ev,
                           "rule": "val_recall_1" if fv == fv_s else "val_balanced_max", "margin": f_margin})
+
+    # ---------------- L: 라벨 효율 (양성 학습 클립 일부만, E*max 판정) ----------------
+    l_needed = [v for v in STAGE_VARIANTS["L"] if "L" in stages and not done(v)]
+    if l_needed:
+        from training.experiments.verifiers import SLIDE_STEP_S, SlidingWindowVerifier
+        t_stage = time.time()
+        X_va, y_va = W.windows_event_v2(va_rows, clips, p_off, augment=False)
+        X_te, y_te, m_te = W.windows_event_v2(test_rows, clips, p_off, augment=False, return_meta=True)
+        runs_l: Dict[str, List[Dict[str, Any]]] = {v: [] for v in l_needed}
+        n_params_l: Dict[str, Any] = {}
+        t_var = {v: 0.0 for v in l_needed}
+        fracs = sorted({L_BASE[v][1] for v in l_needed})
+        for seed in seed_list:
+            ts = time.time()
+            # E와 같은 학습 창 (같은 증강 rng) -> 양성 창만 clip_id 단위로 줄임
+            X_tr, y_tr, m_tr = W.windows_event_v2(tr_rows, clips, p_off, rng=np.random.default_rng(1000 + seed),
+                                                  augment=True, return_meta=True)
+            t_build = time.time() - ts
+            pos_all = positive_clip_ids(m_tr, y_tr)
+            kept = nested_clip_subsets(pos_all, fracs, fold=k, seed=seed)
+            _log(f"fold {k}: L seed {seed} windows train {X_tr.shape} pos clips {len(pos_all)} "
+                 f"kept {[len(kept[f]) for f in fracs]} ({t_build:.0f}s)")
+            for v in l_needed:
+                ts = time.time()
+                base, frac = L_BASE[v]
+                keep = np.asarray(keep_positive_mask(m_tr, y_tr, kept[frac]), dtype=bool)
+                Xs, ys = X_tr[keep], y_tr[keep]
+                ms = [m for m, kk in zip(m_tr, keep) if kk]
+                entry, n_par, train = _fit_supervised(base, Xs, ys, X_va, y_va, seed, device, recipe("improved"),
+                                                      hgb_iter)
+                n_params_l[v] = n_par
+                tr_s = time.time() - ts
+                mdir.mkdir(parents=True, exist_ok=True)
+                _save_e_model(entry, base, mdir / f"{v}_s{seed}")
+                kind, model, std = entry
+                if not len(X_te):
+                    p_te = np.zeros(0)
+                elif kind == "hgb":
+                    p_te = model.predict_proba(W.handcrafted(X_te))[:, 1]
+                else:
+                    p_te = T.predict_proba(model, std(X_te))
+                pos_ds: Dict[str, int] = {}
+                for c in kept[frac]:
+                    d = c.split("/", 1)[0]
+                    pos_ds[d] = pos_ds.get(d, 0) + 1
+                train.update({"label_frac": frac, "n_pos_clips": len(kept[frac]), "n_pos_clips_total": len(pos_all),
+                              "n_pos_windows": int(ys.sum()), "n_neg_windows": int(len(ys) - ys.sum()),
+                              "pos_clips_by_prefix": pos_ds, "train_kinds": W.count_windows(ms, by=("kind", "y"))})
+                ver = SlidingWindowVerifier(_e_scorer(entry, device), mode="max", model_id=f"{v}-s{seed}")
+                outs = _evaluate(test_rows, clips, p_veto, ver)
+                runs_l[v].append({"seed": seed, "outcomes": outs, "summary": R.summarize(outs),
+                                  "threshold": DEFAULT_TH, "window": _window_metrics(y_te, p_te, m_te),
+                                  "train": train, "verifier": ver.stats()})
+                t_var[v] += time.time() - ts + t_build / len(l_needed)
+                _log(f"fold {k}: {v} seed {seed} pos clips {len(kept[frac])}/{len(pos_all)} train {tr_s:.0f}s "
+                     f"win auc {runs_l[v][-1]['window']['roc_auc']}")
+        for v in l_needed:
+            base, frac = L_BASE[v]
+            save(v, {"params": n_params_l.get(v), "params_unit": "tree nodes" if base == "E0" else "weights",
+                     "runs": runs_l[v], "time_s": t_var[v], "base": base, "label_frac": frac, "mode": "max",
+                     "step_s": SLIDE_STEP_S, "sampling": "positive train clips by clip_id, nested 50>25>10, "
+                     "random.Random(f'{fold}-{seed}-{frac}')",
+                     "n_windows": {"val": int(len(y_va)), "test": int(len(y_te))}})
+        _log(f"fold {k}: L total {time.time() - t_stage:.0f}s")
+
+    # ---------------- G: 정상 창만으로 학습한 이상 탐지 (보정 p, E*max 판정) ----------------
+    g_needed = [v for v in STAGE_VARIANTS["G"] if "G" in stages and not done(v)]
+    if g_needed:
+        from training import anomaly as AN
+        from training.experiments.verifiers import SLIDE_STEP_S
+        t_stage = time.time()
+        X_va, y_va, m_va = W.windows_event_v2(va_rows, clips, p_off, augment=False, return_meta=True)
+        va_neg = np.asarray(y_va) == 0
+        X_va_n = X_va[va_neg]
+        # 엄격한 정상 집합 (GnfS): ADL 클립의 창만
+        va_adl = np.asarray([m.get("label") != "fall" for m in m_va], dtype=bool) & va_neg
+        X_va_s = X_va[va_adl]
+        X_te, y_te, m_te = W.windows_event_v2(test_rows, clips, p_off, augment=False, return_meta=True)
+        # 학습할 탐지기: 요청된 G{kind} + GnfE0용 nf (Gnf를 다시 돌리지 않으면 저장된 모델을 먼저 찾음)
+        fit_kinds = [kd for kd in AN.KINDS if any(G_KIND.get(v) == kd for v in g_needed)]
+        strict_needed = [v for v in g_needed if v in G_STRICT]
+        combo_kinds = sorted({G_COMBO[v][0] for v in g_needed if v in G_COMBO})
+        runs_g: Dict[str, List[Dict[str, Any]]] = {v: [] for v in g_needed}
+        n_params_g: Dict[str, Any] = {}
+        t_var = {v: 0.0 for v in g_needed}
+        n_win: Dict[str, Any] = {}
+
+        def g_eval(v, seed, score_fn, s_te, train, cal_params, extra=None):
+            ts_e = time.time()
+            ver = NanSafeSlidingVerifier(score_fn, model_id=f"{v}-s{seed}")
+            outs = _evaluate(test_rows, clips, p_veto, ver)
+            win = _window_metrics_nan(y_te, s_te, m_te)
+            run = {"seed": seed, "outcomes": outs, "summary": R.summarize(outs), "threshold": DEFAULT_TH,
+                   "window": win, "train": train, "calibrator": cal_params, "verifier": ver.stats()}
+            run.update(extra or {})
+            runs_g[v].append(run)
+            st = ver.stats()
+            _log(f"fold {k}: {v} seed {seed} win auc {win['roc_auc']} (nan {win['n_nan']}) calls {st['calls']} "
+                 f"none {st['none']} nan windows {st['nan_windows']} all-nan calls {st['all_nan_calls']} "
+                 f"eval {time.time() - ts_e:.0f}s")
+            return time.time() - ts_e
+
+        for seed in seed_list:
+            # E와 같은 학습 창 (같은 증강 rng) -> 음성(정상) 창만. 탐지기를 실제로 학습할 때만 만듦 (저장된 모델만
+            # 쓰는 GnfE0 단독 실행이면 만들지 않음)
+            n_win = {"val_normal": int(len(X_va_n)), "val_normal_adl": int(len(X_va_s)), "test": int(len(y_te)),
+                     "test_pos": int(np.sum(y_te))}
+            tr_cache: Dict[str, Any] = {}
+
+            def get_tr(seed=seed, tr_cache=tr_cache, n_win=n_win):
+                if not tr_cache:
+                    ts_b = time.time()
+                    X_tr, y_tr, m_tr = W.windows_event_v2(tr_rows, clips, p_off,
+                                                          rng=np.random.default_rng(1000 + seed),
+                                                          augment=True, return_meta=True)
+                    neg = np.asarray(y_tr) == 0
+                    adl = np.asarray([m.get("label") != "fall" for m in m_tr], dtype=bool) & neg
+                    tr_cache["X_n"] = X_tr[neg]
+                    tr_cache["X_s"] = X_tr[adl]
+                    m_tr_n = [m for m, ok in zip(m_tr, neg) if ok]
+                    del X_tr
+                    tr_cache["t_build"] = time.time() - ts_b
+                    n_win.update({"train_normal": int(neg.sum()), "train_normal_adl": int(adl.sum()),
+                                  "train_dropped_pos": int((~neg).sum()),
+                                  "train_kinds": W.count_windows(m_tr_n, by=("kind", "y"))})
+                    _log(f"fold {k}: G seed {seed} normal windows train {tr_cache['X_n'].shape} "
+                         f"(ADL clips only {tr_cache['X_s'].shape}), val {X_va_n.shape} ({len(X_va_s)}), "
+                         f"test {X_te.shape} ({tr_cache['t_build']:.0f}s)")
+                return tr_cache
+
+            def build_share():
+                # 창 생성 시간은 학습한 변형들이 나눠 가짐
+                return tr_cache.get("t_build", 0.0) / max(1, len(g_needed))
+
+            fitted: Dict[str, Tuple[Any, Any]] = {}
+            for kind in fit_kinds + [kd for kd in combo_kinds if kd not in fit_kinds]:
+                v = f"G{kind}"
+                if v not in g_needed:
+                    got = _load_g_model(mdir, kind, seed, device)
+                    if got is not None:
+                        fitted[kind] = got
+                        _log(f"fold {k}: {v} seed {seed} loaded from {mdir} (for {combo_kinds})")
+                        continue
+                X_tr_n = get_tr()["X_n"]
+                ts = time.time()
+                over = {"max_epochs": int(epochs)} if epochs is not None and kind != "md" else {}
+                det = AN.fit_detector(kind, X_tr_n, X_va_n, seed=seed, device=device, **over)
+                s_va = det.score(X_va_n)
+                cal = AN.Calibrator.fit(s_va)
+                tr_s = time.time() - ts
+                mdir.mkdir(parents=True, exist_ok=True)
+                _save_g_model(det, cal, mdir / f"{v}_s{seed}.pt")
+                fitted[kind] = (det, cal)
+                n_params_g[v] = det.n_params
+                _log(f"fold {k}: {v} seed {seed} fit {tr_s:.0f}s best ep {det.info.get('best_epoch')}/"
+                     f"{det.info.get('stopped_epoch')} val thr {cal.threshold:.4g} "
+                     f"(val nan {int(np.isnan(s_va).sum())}/{len(s_va)})")
+                if v not in g_needed:
+                    continue
+                s_te = det.score(X_te)
+                train = _g_train_summary(det, tr_s, s_va, n_win)
+                t_eval = g_eval(v, seed, AN.calibrated_scorer(det, cal), s_te, train, cal.params(),
+                                {"window_veto": _veto_rates(cal(s_te), y_te)})
+                t_var[v] += tr_s + t_eval + build_share()
+            for v in strict_needed:
+                kind = G_STRICT[v]
+                X_tr_s = get_tr()["X_s"]
+                ts = time.time()
+                over = {"max_epochs": int(epochs)} if epochs is not None and kind != "md" else {}
+                det = AN.fit_detector(kind, X_tr_s, X_va_s, seed=seed, device=device, **over)
+                s_va = det.score(X_va_s)
+                cal = AN.Calibrator.fit(s_va)
+                tr_s = time.time() - ts
+                mdir.mkdir(parents=True, exist_ok=True)
+                _save_g_model(det, cal, mdir / f"{v}_s{seed}.pt")
+                n_params_g[v] = det.n_params
+                _log(f"fold {k}: {v} seed {seed} fit {tr_s:.0f}s on ADL-clip windows {X_tr_s.shape} "
+                     f"best ep {det.info.get('best_epoch')}/{det.info.get('stopped_epoch')} val thr {cal.threshold:.4g}")
+                s_te = det.score(X_te)
+                train = _g_train_summary(det, tr_s, s_va, n_win, strict=True)
+                t_eval = g_eval(v, seed, AN.calibrated_scorer(det, cal), s_te, train, cal.params(),
+                                {"window_veto": _veto_rates(cal(s_te), y_te)})
+                t_var[v] += tr_s + t_eval + build_share()
+            for v in (vv for vv in g_needed if vv in G_COMBO):
+                kind, ev = G_COMBO[v]
+                ts = time.time()
+                entry = e_models.get((ev, seed)) or _load_e_model(mdir, ev, seed)
+                if entry is None:
+                    raise FileNotFoundError(f"fold {k}: {ev} seed {seed} model not found (run stage E first)")
+                e_models[(ev, seed)] = entry
+                det, cal = fitted[kind]
+                g_fn, e_fn = AN.calibrated_scorer(det, cal), _e_scorer(entry, device)
+
+                def comb_fn(X, g_fn=g_fn, e_fn=e_fn):
+                    return combine_mean_p(g_fn(X), e_fn(X))
+
+                p_te = comb_fn(X_te) if len(X_te) else np.zeros(0)
+                n_params_g[v] = det.n_params
+                train = {"time_s": None, "n_pos_clips": None, "detector": f"G{kind}_s{seed}",
+                         "e_model": f"{ev}_s{seed}", "combine": "mean(p_G, p_E), p_G NaN -> p_E"}
+                t_eval = g_eval(v, seed, comb_fn, p_te, train, cal.params(), {"window_veto": _veto_rates(p_te, y_te)})
+                t_var[v] += time.time() - ts
+        for v in g_needed:
+            kind = G_KIND.get(v) or G_STRICT.get(v) or G_COMBO[v][0]
+            fit_on = ("val windows of ADL clips (va_rows, label adl)" if v in G_STRICT
+                      else "val normal windows (va_rows, y == 0, incl. pre-fall windows of fall clips)")
+            res = {"params": n_params_g.get(v), "params_unit": G_PARAMS_UNIT[kind], "runs": runs_g[v],
+                   "time_s": t_var[v], "kind": kind, "mode": "max", "step_s": SLIDE_STEP_S, "label_frac": 0.0,
+                   "normal_set": "adl_clips_only" if v in G_STRICT else "negative_windows",
+                   "calibration": {"q": 0.8, "p_at_q": DEFAULT_TH, "fit_on": fit_on},
+                   "n_windows": n_win}
+            if v in G_COMBO:
+                res.update({"label_frac": 1.0, "base": G_COMBO[v][1], "params_unit": "weights (+E0 trees)"})
+            save(v, res)
+        _log(f"fold {k}: G total {time.time() - t_stage:.0f}s")
     return results
+
+
+def _veto_rates(p, y) -> Dict[str, Any]:
+    """창 단위 억제 비율 (p <= 0.4): 정상 창 중 억제, 양성 창 중 통과. NaN p는 판단 불가(통과)로 셈."""
+    import numpy as np
+
+    p = np.asarray(p, dtype=np.float64)
+    y = np.asarray(y).astype(int)
+    veto = np.isfinite(p) & (p <= DEFAULT_TH)
+    neg, pos = y == 0, y == 1
+    return {"neg_vetoed": float(veto[neg].mean()) if neg.any() else None,
+            "pos_passed": float((~veto[pos]).mean()) if pos.any() else None,
+            "n_nan": int((~np.isfinite(p)).sum())}
+
+
+def _g_train_summary(det, t_s: float, s_va, n_win: Dict[str, Any], strict: bool = False) -> Dict[str, Any]:
+    """
+    이상 탐지기 학습 기록 요약 (JSON용): epoch 곡선, best epoch, 검증 점수 통계, 낙상 라벨 0개.
+    strict: ADL 클립 창만으로 학습한 변형 (학습/검증 창 수를 그 집합 기준으로 기록)
+    """
+    import numpy as np
+
+    info = det.info or {}
+    eps = info.get("epochs") or []
+    s_va = np.asarray(s_va, dtype=np.float64)
+    fin = s_va[np.isfinite(s_va)]
+    out = {"time_s": round(t_s, 2), "n_pos_clips": 0, "label_frac": 0.0,
+           "n_train": n_win.get("train_normal_adl" if strict else "train_normal"),
+           "n_val": n_win.get("val_normal_adl" if strict else "val_normal"),
+           "best_epoch": info.get("best_epoch"), "stopped_epoch": info.get("stopped_epoch"),
+           "best_val_loss": info.get("best_val_loss"), "diverged": info.get("diverged"),
+           "train_loss_curve": [e.get("train_loss") for e in eps], "val_loss_curve": [e.get("val_loss") for e in eps],
+           "val_score": {"n_nan": int(len(s_va) - len(fin)),
+                         "mean": float(fin.mean()) if len(fin) else None,
+                         "q50": float(np.quantile(fin, 0.5)) if len(fin) else None,
+                         "q80": float(np.quantile(fin, 0.8)) if len(fin) else None},
+           "train_kinds": n_win.get("train_kinds")}
+    for key in ("n_train_segments", "n_val_segments", "noise", "recipe", "arch", "device", "shrinkage",
+                "n_features", "train_loss", "val_loss"):
+        if key in info:
+            out[key] = info[key]
+    return out
+
+
+def _save_g_model(det, cal, path: Path) -> Path:
+    """이상 탐지기 + 보정기 -> path (.pt, torch.save): {"kind", "detector": state(), "calibrator": params()}"""
+    import torch
+
+    torch.save({"kind": det.kind, "detector": det.state(), "calibrator": cal.params()}, path)
+    return path
+
+
+def _load_g_model(mdir: Path, kind: str, seed: int, device: str = "cpu") -> Optional[Tuple[Any, Any]]:
+    """저장된 G{kind}_s{seed}.pt -> (Detector, Calibrator), 없으면 None"""
+    import torch
+
+    from training import anomaly as AN
+
+    p = Path(mdir) / f"G{kind}_s{seed}.pt"
+    if not p.exists():
+        return None
+    ck = torch.load(p, map_location="cpu", weights_only=False)
+    return AN.load_detector(kind, ck["detector"], device=device), AN.Calibrator.from_params(ck["calibrator"])
+
+
+def _make_hgb(seed: int, hgb_iter: int = 300):
+    """
+    E0 분류기. early_stopping=True를 명시: sklearn 기본값 'auto'는 학습 표본이 1만 개를 넘을 때만 켜져,
+    양성 클립을 줄인 L 변형(1만 개 미만)과 E0(약 1.2만 개)의 학습 방식이 달라짐. 1만 개 초과에서는 'auto'와 같은 모델.
+    """
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    return HistGradientBoostingClassifier(max_iter=int(hgb_iter), learning_rate=0.1, class_weight="balanced",
+                                          early_stopping=True, validation_fraction=0.1, random_state=seed)
+
+
+def _fit_supervised(base: str, X_tr, y_tr, X_va, y_va, seed: int, device: str, recipe: Dict[str, Any],
+                    hgb_iter: int = 300) -> Tuple[Tuple[str, Any, Any], Any, Dict[str, Any]]:
+    """
+    단계 E와 같은 레시피로 E0 (HistGradientBoosting, 손설계 특징) 또는 E1/E2 (표준화 v2 + NN) 학습 (L 단계용).
+    반환: (모델 항목 ("hgb", clf, None) / ("nn", model, 표준화), 파라미터 수, 학습 기록 요약)
+    """
+    import numpy as np
+
+    from training.experiments import models as M
+    from training.experiments import trainer as T
+    from training.experiments import windows as W
+
+    ts = time.time()
+    if base == "E0":
+        clf = _make_hgb(seed, hgb_iter)
+        clf.fit(W.handcrafted(X_tr), y_tr)
+        n_par = int(sum(len(pr.nodes) for it in clf._predictors for pr in it))
+        train = {"time_s": round(time.time() - ts, 2), "n_train": int(len(y_tr)),
+                 "train_pos_frac": float(np.mean(y_tr)) if len(y_tr) else None, "n_iter": int(clf.n_iter_)}
+        return ("hgb", clf, None), n_par, train
+    std = _Standardizer.fit(X_tr)
+    T.set_seed(seed)
+    model = M.Fall1DCNNGAP(W.V2_CHANNELS) if base == "E1" else M.FallTCN(W.V2_CHANNELS)
+    n_par = M.count_params(model)
+    model, hist = T.train_classifier(model, std(X_tr), y_tr, std(X_va), y_va, recipe, seed=seed, device=device)
+    return ("nn", model, std), n_par, _train_summary(hist, time.time() - ts, y_tr)
+
+
+def _save_e_model(entry: Tuple[str, Any, Any], base: str, stem: Path) -> Path:
+    """모델 항목 -> stem.pkl (hgb) / stem.pt (nn, E와 같은 형식: arch, state_dict, mu, sd). _load_e_model이 읽음."""
+    import pickle
+
+    import torch
+
+    kind, model, std = entry
+    if kind == "hgb":
+        path = stem.with_suffix(".pkl")
+        with open(path, "wb") as f:
+            pickle.dump(model, f)
+        return path
+    path = stem.with_suffix(".pt")
+    torch.save({"arch": base, "state_dict": model.state_dict(), "mu": std.mu, "sd": std.sd}, path)
+    return path
 
 
 def val_points(val_outs: List[Dict[str, Any]]) -> List[Tuple[str, bool, Optional[float]]]:
@@ -1049,7 +1825,10 @@ def select_threshold_balanced(points: Sequence[Tuple[str, bool, Optional[float]]
 
 
 def _load_e_model(mdir: Path, variant: str, seed: int) -> Optional[Tuple[str, Any, Any]]:
-    """저장된 E 모델 -> ("hgb", clf, None) 또는 ("nn", model, 표준화) (없으면 None)"""
+    """
+    저장된 E 모델 -> ("hgb", clf, None) 또는 ("nn", model, 표준화) (없으면 None).
+    아키텍처는 이름 앞 두 글자 (E0/E1/E2; L 변형 E0p10, E1p25 등도 같은 형식으로 저장됨).
+    """
     import pickle
 
     import torch
@@ -1057,7 +1836,8 @@ def _load_e_model(mdir: Path, variant: str, seed: int) -> Optional[Tuple[str, An
     from training.experiments import models as M
     from training.experiments import windows as W
 
-    if variant == "E0":
+    arch = variant[:2]
+    if arch == "E0":
         p = mdir / f"{variant}_s{seed}.pkl"
         if not p.exists():
             return None
@@ -1067,7 +1847,7 @@ def _load_e_model(mdir: Path, variant: str, seed: int) -> Optional[Tuple[str, An
     if not p.exists():
         return None
     ck = torch.load(p, map_location="cpu", weights_only=False)
-    model = M.Fall1DCNNGAP(W.V2_CHANNELS) if variant == "E1" else M.FallTCN(W.V2_CHANNELS)
+    model = M.Fall1DCNNGAP(W.V2_CHANNELS) if arch == "E1" else M.FallTCN(W.V2_CHANNELS)
     model.load_state_dict(ck["state_dict"])
     return ("nn", model, _Standardizer(ck["mu"], ck["sd"]))
 
@@ -1104,10 +1884,15 @@ PROTOCOL = ("15Hz runtime replay (nearest frame), EMA smoothing, 20s freeze tail
             "event level: fall clip detected = any level1, ADL false alarm = any level1")
 
 
-def summarize_out(out_dir: Path, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """out_dir의 fold 결과를 모아 summary.json / summary.md를 씁니다."""
+def summarize_out(out_dir: Path, meta: Optional[Dict[str, Any]] = None, fa_ref: str = DEFAULT_FA_REF
+                  ) -> Dict[str, Any]:
+    """out_dir의 fold 결과를 모아 summary.json / summary.md를 씁니다. fa_ref: 같은 오탐률 비교의 기준 변형."""
     results = _load_fold_results(out_dir)
-    summary = build_summary(results, meta=dict({"protocol": PROTOCOL}, **(meta or {})))
+    meta = dict(meta or {})
+    if "stages" in meta:
+        meta["requested_stages"] = meta.pop("stages")
+    meta["stages"] = [s for s in STAGES if any(v in results for v in STAGE_VARIANTS[s])]
+    summary = build_summary(results, meta=dict({"protocol": PROTOCOL}, **meta), fa_ref=fa_ref)
     _write_json(out_dir / "summary.json", summary)
     (out_dir / "summary.md").write_text(render_markdown(summary), encoding="utf-8")
     return summary
@@ -1169,6 +1954,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--skip-existing", action="store_true", help="이미 있는 fold/변형 결과는 다시 돌리지 않음")
     ap.add_argument("--no-summary", action="store_true")
     ap.add_argument("--summarize-only", action="store_true")
+    ap.add_argument("--fa-ref", default=DEFAULT_FA_REF, help="같은 오탐률(matched FA) 비교의 기준 변형")
     args = ap.parse_args(argv)
 
     out_dir = Path(args.out)
@@ -1176,11 +1962,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         out_dir = REPO_ROOT / out_dir
     args.stages_list = parse_stages(args.stages)
     fold_list = parse_folds(args.folds)
+    if args.fa_ref not in VARIANTS:
+        raise SystemExit(f"--fa-ref: 알 수 없는 변형 {args.fa_ref!r}")
     meta = {"stages": args.stages_list, "folds": fold_list, "seeds": args.seeds, "f_margin": args.f_margin,
-            "epochs_override": args.epochs}
+            "epochs_override": args.epochs, "fa_ref": args.fa_ref}
 
     if args.summarize_only:
-        summarize_out(out_dir, meta)
+        summarize_out(out_dir, meta, fa_ref=args.fa_ref)
         _log(f"summary written to {out_dir}")
         return 0
 
@@ -1226,7 +2014,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             _log(f"fold {k} total {time.time() - tk:.0f}s")
     _log(f"all folds done in {time.time() - t_all:.0f}s")
     if not args.no_summary:
-        summarize_out(out_dir, meta)
+        summarize_out(out_dir, meta, fa_ref=args.fa_ref)
         _log(f"summary written to {out_dir / 'summary.md'}")
     return 1 if failed else 0
 
