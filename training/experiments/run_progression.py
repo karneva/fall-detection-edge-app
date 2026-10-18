@@ -84,13 +84,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = REPO_ROOT / "dataset" / "_experiments" / "progression_v1"
 DEFAULT_MANIFEST = REPO_ROOT / "dataset" / "_manifest" / "manifest_v1.jsonl"
 
-STAGES = ("A", "B", "C", "D", "E", "Es", "F", "L", "G")
+STAGES = ("A", "B", "C", "D", "E", "Es", "F", "L", "G", "R")
 STAGE_VARIANTS: Dict[str, Tuple[str, ...]] = {
     "A": ("A",), "B": ("B",), "C": ("C",), "D": ("D",),
     "E": ("E0", "E1", "E2"), "Es": ("E0max", "E1max", "E2max", "E0last", "E1last", "E2last"),
     "F": ("F0", "F1", "F2", "F0b", "F1b", "F2b"),
     "L": ("E0p10", "E0p25", "E0p50", "E1p10", "E1p25", "E1p50"),
     "G": ("Gmd", "Gae", "Gnf", "GnfS", "GnfE0"),
+    "R": ("AR1", "E0maxR1", "E1maxR1"),
 }
 # E* 변형 -> (기준 E 변형, SlidingWindowVerifier mode)
 ES_BASE: Dict[str, Tuple[str, str]] = {v: (v[:2], v[2:]) for v in STAGE_VARIANTS["Es"]}
@@ -117,6 +118,13 @@ DEFAULT_FA_REF = "E0max"
 VARIANTS = tuple(v for s in STAGES for v in STAGE_VARIANTS[s])
 VARIANT_INFO: Dict[str, Dict[str, str]] = {
     "A": {"title": "규칙만", "change": "rules only (ai_mode=off)", "model": "-"},
+    "AR1": {"title": "규칙만 + 짧은 미검출 유예 (R1)",
+            "change": "rules only, lost_grace_s=0.5 (keep warmup/accumulators, continue timeout over short gaps)",
+            "model": "-"},
+    "E0maxR1": {"title": "E0max + 짧은 미검출 유예 (R1)", "change": "E0max verifier (saved E0), rules with lost_grace_s=0.5",
+                "model": "HistGradientBoosting"},
+    "E1maxR1": {"title": "E1max + 짧은 미검출 유예 (R1)", "change": "E1max verifier (saved E1), rules with lost_grace_s=0.5",
+                "model": "Fall1DCNN-GAP"},
     "B": {"title": "1D CNN + URFD (원래 방식)", "change": "+ Fall1DCNN, URFD only, whole-video labels, 30fps",
           "model": "Fall1DCNN (v1 30f)"},
     "C": {"title": "+ 데이터 추가", "change": "+ all datasets (+figshare), same recipe", "model": "Fall1DCNN (v1 30f)"},
@@ -184,6 +192,8 @@ VARIANT_INFO: Dict[str, Dict[str, str]] = {
 EVAL_DATASETS_ORDER = ("le2i", "caucafall", "gmdcsa24", "mcfd", "urfd")
 
 DEFAULT_TH = 0.4
+# R1: 짧은 미검출 유예 (초, Level1Params.lost_grace_s). 사전에 정한 값 (Day 5 분석: 한 프레임 끊김에 워밍업 리셋)
+LOST_GRACE_R1 = 0.5
 F_MARGIN = 0.05
 F_TH_MAX = 0.95
 VAL_FRAC = 0.15
@@ -1664,6 +1674,31 @@ def run_fold(k: int, rows: List[Dict[str, Any]], folds: Dict[str, int], clips: D
                 res.update({"label_frac": 1.0, "base": G_COMBO[v][1], "params_unit": "weights (+E0 trees)"})
             save(v, res)
         _log(f"fold {k}: G total {time.time() - t_stage:.0f}s")
+
+    # ---------------- R: 규칙 엔진 변경 (R1: 짧은 미검출 유예) ----------------
+    if "R" in stages and not done("AR1"):
+        t0 = time.time()
+        outs = _evaluate(test_rows, clips, R.study_params("off", lost_grace_s=LOST_GRACE_R1))
+        save("AR1", {"params": None, "lost_grace_s": LOST_GRACE_R1,
+                     "runs": [{"seed": None, "outcomes": outs, "summary": R.summarize(outs), "threshold": None}],
+                     "time_s": time.time() - t0})
+    r_needed = [vv for vv in ("E0maxR1", "E1maxR1") if "R" in stages and not done(vv)]
+    if r_needed:
+        from training.experiments.verifiers import SlidingWindowVerifier as _SWV
+    for v in r_needed:
+        ev = v[:2]
+        t0 = time.time()
+        runs_r = []
+        for seed in seed_list:
+            entry = _load_e_model(mdir, ev, seed)
+            if entry is None:
+                raise FileNotFoundError(f"fold {k}: {ev} seed {seed} model not found (run stage E first)")
+            ver = _SWV(_e_scorer(entry, device), mode="max", model_id=f"{v}-s{seed}")
+            outs = _evaluate(test_rows, clips, R.study_params("veto", lost_grace_s=LOST_GRACE_R1), ver)
+            runs_r.append({"seed": seed, "outcomes": outs, "summary": R.summarize(outs), "threshold": DEFAULT_TH,
+                           "verifier": ver.stats()})
+        save(v, {"params": None, "lost_grace_s": LOST_GRACE_R1, "base": f"{ev}max", "runs": runs_r,
+                 "time_s": time.time() - t0})
     return results
 
 
@@ -1919,6 +1954,8 @@ def _spawn_folds(args, fold_list: List[int], out_dir: Path) -> int:
                    "--manifest", str(args.manifest), "--folds-file", str(args.folds_file)]
             if args.epochs is not None:
                 cmd += ["--epochs", str(args.epochs)]
+            if args.kp_dir:
+                cmd += ["--kp-dir", str(args.kp_dir)]
             if args.skip_existing:
                 cmd += ["--skip-existing"]
             fh = open(log_dir / f"fold{k}.log", "a", encoding="utf-8")
@@ -1958,6 +1995,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--no-summary", action="store_true")
     ap.add_argument("--summarize-only", action="store_true")
     ap.add_argument("--fa-ref", default=DEFAULT_FA_REF, help="같은 오탐률(matched FA) 비교의 기준 변형")
+    ap.add_argument("--kp-dir", default=None,
+                    help="키포인트 클립 폴더 (기본 dataset/_keypoints/v1). 다른 추출본으로 같은 실험을 돌릴 때는 --out도 따로 둘 것")
     args = ap.parse_args(argv)
 
     out_dir = Path(args.out)
@@ -2007,7 +2046,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             folds = FO.build_folds(rows)
             FO.save_folds(fpath, folds, meta={"n_folds": 5, "seed": 0, "manifest": str(args.manifest)})
         t0 = time.time()
-        clips = W.load_clips(rows)
+        clips = W.load_clips(rows, kp_dir=args.kp_dir)
         _log(f"loaded {len(clips)} clips in {time.time() - t0:.1f}s, device {device}")
         failed = 0
         for k in fold_list:

@@ -429,6 +429,8 @@ def main(argv=None) -> int:
     ap.add_argument("--batch", type=int, default=8, help="추론 배치 크기 (결과에는 영향 없음)")
     ap.add_argument("--half", action="store_true", help="FP16 추론 (GPU 전용)")
     ap.add_argument("--hash", action="store_true", help="원본 영상 sha256을 meta에 기록")
+    ap.add_argument("--conf", type=float, default=None,
+                    help="사람 검출 신뢰도 하한 (기본: 운영과 같은 app.config.DEFAULT_CONF). 바꾸면 운영 DEFAULT_CONF도 같이 바꿔야 함")
     args = ap.parse_args(argv)
 
     from app.config import DEFAULT_CONF
@@ -445,9 +447,10 @@ def main(argv=None) -> int:
     except ImportError:
         ul_version = None
     model_name = Path(args.model).name if args.model else YOLO_POSE_MODEL
+    conf = float(args.conf) if args.conf is not None else float(DEFAULT_CONF)
     extractor_meta = {
         "model": model_name,
-        "conf": float(DEFAULT_CONF),
+        "conf": conf,
         "imgsz": IMGSZ,
         "select": SELECT_NAME,
         "ultralytics_version": ul_version,
@@ -457,8 +460,8 @@ def main(argv=None) -> int:
 
     def get_predictor() -> Predictor:
         path = resolve_model_path(args.model)
-        print(f"[extract] model={path} conf={DEFAULT_CONF} imgsz={IMGSZ} device={args.device or 'auto'}")
-        return make_yolo_predictor(path, args.device, float(DEFAULT_CONF), IMGSZ, half=args.half)
+        print(f"[extract] model={path} conf={conf} imgsz={IMGSZ} device={args.device or 'auto'}")
+        return make_yolo_predictor(path, args.device, conf, IMGSZ, half=args.half)
 
     print(f"[extract] {len(rows)} clips -> {out_dir}")
     stats = run_extraction(rows, out_dir, get_predictor, open_video_cv2, extractor_meta, limit=args.limit,
