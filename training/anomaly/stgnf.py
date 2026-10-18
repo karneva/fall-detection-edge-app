@@ -44,7 +44,9 @@ arXiv 2211.10946) 직접 구현 (torch 필요). 공식 코드(github.com/orhir/S
     ActNorm 편향과 1x1 conv가 상수 이동을 흡수하므로 표현력은 같음 (지도 설정의 GMM 사전분포는 구현하지 않음)
   - 인접 행렬: 논문 보충 자료는 모든 관절이 같은 비중인 'unit adjacency'가 가장 좋았다고 함. 스펙에 따라 골격
     인접 행렬을 기본으로 쓰고 비교용으로 adjacency="full"을 둠. fold 0 seed 0 검증 정상 NLL(nats/원소)은
-    skeleton 0.112, full 0.868로 골격 쪽이 훨씬 낮아 기본값을 유지 (선택은 검증 정상 손실로만 함)
+    skeleton 0.112, full 0.868로 골격 쪽이 훨씬 낮아 기본값을 유지 (선택은 검증 정상 손실로만 함).
+    이 비교는 머리-몸통 연결 (3, 5), (4, 6)을 추가하기 전(그래프가 머리와 몸으로 나뉜 상태)에 잰 값이며 다시 재지 않음
+  - 학습 예산: 5-fold 실행에서 거의 모든 run의 best epoch가 상한(30)이라 더 학습하면 나아질 여지가 있음
   - coupling 스케일: tanh 제한 + 마지막 층 0 초기화 (Glow 계열 구현의 sigmoid(h + 2)와 달리 시작이 정확히 항등).
     coupling NN 안에 BatchNorm을 두지 않음 (학습 중에도 표본별 밀도가 배치와 무관하도록)
   - 학습 길이: 논문 8 epoch 고정, 여기는 최대 30 epoch + 검증 NLL early stopping
