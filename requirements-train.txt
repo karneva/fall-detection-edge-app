@@ -3,3 +3,5 @@
 numpy
 ultralytics
 tqdm
+# 실험(training/experiments, training/anomaly): HistGradientBoosting, LedoitWolf, 분할
+scikit-learn

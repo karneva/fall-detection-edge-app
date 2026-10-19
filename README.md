@@ -302,6 +302,7 @@ python -m training.retrain_from_runs      # 현장 클립으로 액티브 러닝
 | [EVALUATION_PROTOCOL](docs/EVALUATION_PROTOCOL.md) | 이벤트 단위 평가 절차, 채택 규칙, 평가셋 관리 |
 | [TUNING_GUIDE](docs/TUNING_GUIDE.md) | 파라미터와 환경변수 튜닝 |
 | [OPERATIONS](docs/OPERATIONS.md) | 실행, API, 저장 파일, 운영 점검 |
+| [DEV_HANDOFF](docs/DEV_HANDOFF.md) | 다른 PC에서 개발 환경과 데이터를 옮겨 이어서 작업하는 방법 |
 | [ROADMAP](docs/ROADMAP.md) | 고도화 계획과 진행 상황 (원인 분석 → 이상 탐지 → 포즈 모델 → 엣지 최적화) |
 | [DATASETS](docs/DATASETS.md) | 추가 학습 데이터 후보, 확보 순서, 라이선스 |
 | [MODEL_STUDY](docs/MODEL_STUDY.md) | 규칙만 → 1D CNN + URFD → 데이터 추가 → 모델 변경 단계별 개선 수치 (5-fold) |
