@@ -40,6 +40,8 @@ DETERMINISTIC = os.getenv("DETERMINISTIC", "1") == "1"
 USE_HALF = False if DETERMINISTIC else (os.getenv("USE_HALF", "1") == "1")
 # YOLOv8 Pose 모델 파일 경로
 MODEL_PATH = os.getenv("MODEL_PATH", "yolov8s-pose.pt")
+# 회전 폴백: 사람을 놓친 프레임에서만 영상을 90/270도로 돌려 다시 검출 (누운 사람 검출용, 놓친 프레임에서만 추론 2회 추가)
+ROTATE_FALLBACK = os.getenv("ROTATE_FALLBACK", "0") == "1"
 
 # ---------------------------------------------------------
 # 장치 식별 및 네트워크 설정

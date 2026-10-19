@@ -47,6 +47,10 @@ FREEZE_TAIL_S = 20.0
 # "multi" = 사람 후보가 2명 이상인 프레임의 전환만 인정 (후보 1명이면 같은 사람으로 봄, 로드맵 R2).
 # multi인데 클립에 n_cand가 없으면 all과 같음. run_progression --switch-policy가 바꿈 (재생 전체에 공통).
 SWITCH_POLICY = "all"
+# 회전 폴백(app.engine.rotate_fallback)으로 찾은 프레임을 쓸지: True면 클립 그대로, False면 그 프레임을 미검출로 바꾸고
+# 대상 전환도 폴백 없는 추적(switched_base)을 씀 -> 폴백 없이 추출한 것과 같음. 클립에 fallback 키가 없으면 영향 없음.
+# run_progression --no-fallback이 바꿈.
+USE_FALLBACK = True
 DEFAULT_T0 = 1000.0
 
 # 시간 기준 탐지(제때 탐지) 판정 창: ABNORMAL 진입/LEVEL1이 [fall_start - PRE, fall_end + POST] 안인지 (MODEL_STUDY와 같은 값)
@@ -188,6 +192,9 @@ def clip_to_obs(clip: Dict[str, Any], hz: float = RUNTIME_HZ, tail_s: float = FR
     kps = np.asarray(clip["kps"], dtype=np.float64).reshape(t, NUM_KPS, 3)
     bbox = np.asarray(clip["bbox"], dtype=np.float64).reshape(t, 4)
     present = np.asarray(clip["present"], dtype=bool).reshape(t)
+    fb = clip.get("fallback")
+    if not USE_FALLBACK and fb is not None:
+        present = present & ~np.asarray(fb, dtype=bool).reshape(t)
     shape = _frame_shape(clip.get("frame_wh"))
 
     _warn_if_ema_disabled()
@@ -220,6 +227,8 @@ def clip_to_obs(clip: Dict[str, Any], hz: float = RUNTIME_HZ, tail_s: float = FR
 def effective_switched(clip: Dict[str, Any], policy: Optional[str] = None) -> Optional[np.ndarray]:
     """정책을 적용한 프레임별 대상 전환 (클립에 switched가 없으면 None)"""
     sw = clip.get("switched")
+    if not USE_FALLBACK and clip.get("switched_base") is not None:
+        sw = clip.get("switched_base")
     if sw is None:
         return None
     policy = policy or SWITCH_POLICY

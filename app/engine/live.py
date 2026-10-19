@@ -4,9 +4,12 @@ from typing import Optional, Dict, Any, Tuple
 import cv2
 from ultralytics import YOLO
 
-from ..config import FRAME_W, FRAME_H, DEFAULT_CONF, USE_HALF
+import numpy as np
+
+from ..config import FRAME_W, FRAME_H, DEFAULT_CONF, USE_HALF, ROTATE_FALLBACK
 from ..core import build_observation
 from ..media.jpeg import encode_jpeg
+from .rotate_fallback import FALLBACK_RECENT_S, fallback_detect
 from .smoothing import ema_smooth_keypoints_inplace
 from .target_select import calculate_iou, select_target_index  # noqa: F401 (calculate_iou: 기존 공개 이름 유지)
 
@@ -74,6 +77,25 @@ def select_best_person(results, last_bbox=None, iou_thresh=0.3):
         
     return results, is_switched
 
+class _OneBoxes:
+    """회전 폴백 결과 1명을 YOLO 결과처럼 보이게 하는 최소 객체 (build_observation이 쓰는 속성만)"""
+
+    def __init__(self, **arrays):
+        self.__dict__.update(arrays)
+
+    def __len__(self):
+        return 1
+
+
+class _FallbackResult:
+    def __init__(self, box, conf, kps):
+        import torch
+        k = np.asarray(kps, np.float32)
+        self.boxes = _OneBoxes(xyxy=torch.as_tensor(np.asarray([box], np.float32)),
+                               conf=torch.as_tensor(np.asarray([conf], np.float32)))
+        self.keypoints = _OneBoxes(xy=torch.as_tensor(k[None, :, :2]), conf=torch.as_tensor(k[None, :, 2]))
+
+
 class LivePipeline:
     """
     실시간 영상 처리 파이프라인 클래스입니다.
@@ -93,6 +115,23 @@ class LivePipeline:
         
         # 객체 추적을 위한 이전 프레임 바운딩 박스 보관
         self.last_bbox = None
+        # 회전 폴백용: 마지막으로 대상을 본 위치(픽셀)와 시각
+        self.rotate_fallback = ROTATE_FALLBACK
+        self.last_seen_bbox = None
+        self.last_seen_ts = None
+
+    def _predict_arrays(self, imgs):
+        """회전 영상 목록 -> [(boxes (N,4), confs (N,), kps (N,17,3))] 픽셀 좌표 (원래 방향과 같은 conf 하한)"""
+        out = []
+        for r in self.model.predict(imgs, device=0, half=USE_HALF, conf=DEFAULT_CONF, verbose=False):
+            if r.boxes is None or len(r.boxes) == 0 or r.keypoints is None:
+                out.append((np.zeros((0, 4)), np.zeros(0), np.zeros((0, 17, 3))))
+                continue
+            kxy = r.keypoints.xy.cpu().numpy()
+            kc = r.keypoints.conf.cpu().numpy() if r.keypoints.conf is not None else np.ones(kxy.shape[:2])
+            out.append((r.boxes.xyxy.cpu().numpy(), r.boxes.conf.cpu().numpy(),
+                        np.concatenate([kxy, kc[..., None]], axis=-1)))
+        return out
 
     def step(self, overlay: str = "smooth") -> Tuple[Optional[Dict[str, Any]], Optional[bytes], Optional[Any]]:
         """
@@ -126,17 +165,27 @@ class LivePipeline:
         
         # 단일 대상 추적 (IoU 기반 대상 고정)
         r0, is_switched = select_best_person(results[0], last_bbox=self.last_bbox)
-        
+        ts = time.time()
+
+        # 회전 폴백: 아무도 못 찾았고 직전에 대상을 봤으면 영상을 돌려 같은 자리의 사람을 다시 찾음
+        used_fallback = False
+        if (self.rotate_fallback and (r0.boxes is None or len(r0.boxes) == 0) and self.last_seen_bbox is not None
+                and ts - self.last_seen_ts <= FALLBACK_RECENT_S):
+            fb = fallback_detect(self._predict_arrays, frame, self.last_seen_bbox)
+            if fb is not None:
+                r0, is_switched, used_fallback = _FallbackResult(fb[0], fb[1], fb[2]), False, True
+
         # 다음 프레임 추적을 위한 위치 업데이트
         if r0.boxes is not None and len(r0.boxes) > 0:
             self.last_bbox = r0.boxes.xyxy[0].cpu().numpy()
+            self.last_seen_bbox, self.last_seen_ts = self.last_bbox, ts
         else:
             self.last_bbox = None
 
-        ts = time.time()
         # 공통 데이터 구조인 Observation 생성 및 EMA 필터링 적용
         obs = build_observation(r0, self.actual_w, self.actual_h, ts, self.frame_index, 
                                 source_id=self.source_id, target_switched=is_switched)
+        obs["meta"]["rotate_fallback"] = used_fallback
         obs = ema_smooth_keypoints_inplace(obs)
 
         self.frame_index += 1

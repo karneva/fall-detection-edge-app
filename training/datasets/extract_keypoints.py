@@ -57,7 +57,8 @@ def empty_detections() -> Detections:
 # ---------------------------------------------------------------------------
 
 def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predictor,
-                   batch: int = 8, iou_thresh: float = IOU_THRESH) -> Dict[str, Any]:
+                   batch: int = 8, iou_thresh: float = IOU_THRESH, fallback: bool = False,
+                   fallback_recent_s: Optional[float] = None) -> Dict[str, Any]:
     """
     프레임을 순서대로 추론하고 런타임과 같은 방식으로 대상 1명을 골라 클립 배열을 만듭니다.
 
@@ -67,19 +68,30 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
       IoU >= iou_thresh인 후보가 없어 최고 신뢰도 후보로 바꾼 경우만 True. 놓친 뒤 다시 잡은 첫 프레임은 False)
     - n_switch = switched.sum()
     - n_cand (T,): 프레임에서 검출된 사람 후보 수 (conf 이상). 대상 전환 정책(후보가 1명이면 전환으로 보지 않음) 비교용
+    - fallback=True: 원래 방향에서 아무도 못 찾았고 직전 fallback_recent_s초 안에 대상을 봤으면 회전 폴백
+      (app.engine.rotate_fallback, 운영과 같은 함수)으로 다시 찾음. 찾으면 그 사람을 대상으로 쓰고 fallback[t] = True.
+      switched_base (T,): 폴백을 쓰지 않았다면 나왔을 대상 전환 (같은 검출로 폴백 없는 추적을 따로 돌림).
+      재생에서 폴백 프레임을 미검출로 바꾸고 switched_base를 쓰면 폴백 없는 추출과 같아짐.
     """
+    from app.engine import rotate_fallback as RF
+
+    recent_s = RF.FALLBACK_RECENT_S if fallback_recent_s is None else float(fallback_recent_s)
     ts: List[float] = []
     kps: List[np.ndarray] = []
     bbox: List[np.ndarray] = []
     present: List[bool] = []
     switched_l: List[bool] = []
     n_cand_l: List[int] = []
+    fallback_l: List[bool] = []
+    switched_base_l: List[bool] = []
+    last_bbox_base = None          # 폴백 없는 추적 (switched_base용)
+    last_seen = None               # (픽셀 상자, 프레임 번호): 마지막으로 대상을 본 위치
     frame_wh: Optional[List[int]] = None
     last_bbox = None
     n_multi = 0
 
     def consume(buf: List[np.ndarray]):
-        nonlocal last_bbox, n_multi, frame_wh
+        nonlocal last_bbox, n_multi, frame_wh, last_bbox_base, last_seen
         dets = predictor(buf)
         if len(dets) != len(buf):
             raise RuntimeError(f"predictor returned {len(dets)} results for {len(buf)} frames")
@@ -91,8 +103,25 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
             if len(boxes) > 1:
                 n_multi += 1
             n_cand_l.append(int(len(boxes)))
+            i_frame = len(ts) - 1
+            # 폴백 없는 추적 (같은 검출, 비교용)
+            idx_b, sw_b = select_target_index(boxes, confs, last_bbox=last_bbox_base, iou_thresh=iou_thresh)
+            switched_base_l.append(bool(sw_b) and idx_b is not None)
+            last_bbox_base = boxes[idx_b] if idx_b is not None else None
             idx, switched = select_target_index(boxes, confs, last_bbox=last_bbox, iou_thresh=iou_thresh)
             switched_l.append(bool(switched) and idx is not None)
+            used_fb = False
+            if idx is None and fallback and last_seen is not None and (i_frame - last_seen[1]) / fps <= recent_s:
+                fb = RF.fallback_detect(lambda imgs: [(b, c, np.concatenate([kx, kc[..., None]], axis=-1))
+                                                      for b, c, kx, kc in predictor(imgs)],
+                                        frame, last_seen[0])
+                if fb is not None:
+                    used_fb = True
+                    boxes = np.asarray([fb[0]])
+                    kxy = np.asarray([fb[2][:, :2]])
+                    kcf = np.asarray([fb[2][:, 2]])
+                    idx = 0
+            fallback_l.append(used_fb)
             if idx is None:
                 last_bbox = None
                 kps.append(np.zeros((NUM_KPS, 3), np.float32))
@@ -100,6 +129,7 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
                 present.append(False)
                 continue
             last_bbox = boxes[idx]
+            last_seen = (np.asarray(boxes[idx], np.float64), i_frame)
             k = np.zeros((NUM_KPS, 3), np.float32)
             k[:, 0] = np.clip(np.asarray(kxy[idx][:, 0], np.float64) / w, 0.0, 1.0)
             k[:, 1] = np.clip(np.asarray(kxy[idx][:, 1], np.float64) / h, 0.0, 1.0)
@@ -129,6 +159,9 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
         "switched": sw,
         "n_switch": int(sw.sum()),
         "n_cand": np.asarray(n_cand_l, np.int16),
+        "fallback": np.asarray(fallback_l, bool) if fallback else None,
+        "switched_base": np.asarray(switched_base_l, bool) if fallback else None,
+        "n_fallback": int(np.sum(fallback_l)),
         "n_multi": n_multi,
     }
 
@@ -187,7 +220,8 @@ def extract_one(row: Dict[str, Any], out_path: Path, predictor: Predictor, open_
     crop = row.get("crop_px")
     if crop is not None:
         frames = CroppedFrames(frames, crop)
-    clip = extract_frames(frames, fps, predictor, batch=batch)
+    # 회전 폴백 여부는 추출 설정(extractor_meta["rotate_fallback"])에 함께 기록
+    clip = extract_frames(frames, fps, predictor, batch=batch, fallback=bool(extractor_meta.get("rotate_fallback")))
     t = int(clip["ts"].shape[0])
     if t == 0:
         raise RuntimeError("no frames decoded")
@@ -206,6 +240,7 @@ def extract_one(row: Dict[str, Any], out_path: Path, predictor: Predictor, open_
         "present_ratio": round(present_ratio, 4),
         "n_target_switch": clip["n_switch"],
         "n_multi_person_frames": clip["n_multi"],
+        "n_fallback_frames": clip["n_fallback"],
         # 컨테이너가 알려준 프레임 수 (디코딩이 중간에 끊겨 클립이 짧아졌는지 확인용, 모르면 None)
         "container_frames": container_frames,
         # 원본 영상에서 잘라 쓴 영역 (kps/bbox/frame_wh는 잘라낸 영역 기준)
@@ -215,7 +250,8 @@ def extract_one(row: Dict[str, Any], out_path: Path, predictor: Predictor, open_
     if with_hash:
         meta["video_sha256"] = sha256_file(video)
     save_clip(out_path, clip["ts"], clip["kps"], clip["bbox"], clip["present"], clip["frame_wh"], meta,
-              switched=clip["switched"], n_cand=clip["n_cand"])
+              switched=clip["switched"], n_cand=clip["n_cand"], fallback=clip["fallback"],
+              switched_base=clip["switched_base"])
     return {"frames": t, "container_frames": container_frames, "native_fps": fps, "fps_source": fps_source,
             "present_ratio": round(present_ratio, 4), "switches": clip["n_switch"]}
 
@@ -433,6 +469,8 @@ def main(argv=None) -> int:
     ap.add_argument("--batch", type=int, default=8, help="추론 배치 크기 (결과에는 영향 없음)")
     ap.add_argument("--half", action="store_true", help="FP16 추론 (GPU 전용)")
     ap.add_argument("--hash", action="store_true", help="원본 영상 sha256을 meta에 기록")
+    ap.add_argument("--rotate-fallback", action="store_true",
+                    help="사람을 놓친 프레임에서만 영상을 90/270도로 돌려 다시 검출 (운영 ROTATE_FALLBACK과 같은 함수)")
     ap.add_argument("--conf", type=float, default=None,
                     help="사람 검출 신뢰도 하한 (기본: 운영과 같은 app.config.DEFAULT_CONF). 바꾸면 운영 DEFAULT_CONF도 같이 바꿔야 함")
     args = ap.parse_args(argv)
@@ -460,6 +498,7 @@ def main(argv=None) -> int:
         "ultralytics_version": ul_version,
         "half": bool(args.half),
         "device": args.device,
+        "rotate_fallback": bool(args.rotate_fallback),
     }
 
     def get_predictor() -> Predictor:

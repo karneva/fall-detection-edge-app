@@ -1960,6 +1960,8 @@ def _spawn_folds(args, fold_list: List[int], out_dir: Path) -> int:
                 cmd += ["--kp-dir", str(args.kp_dir)]
             if args.switch_policy != "all":
                 cmd += ["--switch-policy", args.switch_policy]
+            if args.no_fallback:
+                cmd += ["--no-fallback"]
             if args.skip_existing:
                 cmd += ["--skip-existing"]
             fh = open(log_dir / f"fold{k}.log", "a", encoding="utf-8")
@@ -2001,6 +2003,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--fa-ref", default=DEFAULT_FA_REF, help="같은 오탐률(matched FA) 비교의 기준 변형")
     ap.add_argument("--switch-policy", default="all", choices=("all", "multi"),
                     help="대상 전환 정책 (all: 운영과 같음, multi: 후보 2명 이상일 때만 전환, 클립에 n_cand 필요)")
+    ap.add_argument("--no-fallback", action="store_true",
+                    help="회전 폴백으로 찾은 프레임을 미검출로 재생 (폴백 켜고 추출한 클립으로 폴백 없는 결과 재현)")
     ap.add_argument("--kp-dir", default=None,
                     help="키포인트 클립 폴더 (기본 dataset/_keypoints/v1). 다른 추출본으로 같은 실험을 돌릴 때는 --out도 따로 둘 것")
     args = ap.parse_args(argv)
@@ -2054,6 +2058,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         t0 = time.time()
         from training.experiments import replay as _R
         _R.SWITCH_POLICY = args.switch_policy
+        _R.USE_FALLBACK = not args.no_fallback
         clips = W.load_clips(rows, kp_dir=args.kp_dir)
         _log(f"loaded {len(clips)} clips in {time.time() - t0:.1f}s, device {device}")
         failed = 0
