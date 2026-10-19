@@ -1687,12 +1687,14 @@ def run_fold(k: int, rows: List[Dict[str, Any]], folds: Dict[str, int], clips: D
         from training.experiments.verifiers import SlidingWindowVerifier as _SWV
     for v in r_needed:
         ev = v[:2]
+        if any(_load_e_model(mdir, ev, sd) is None for sd in seed_list):
+            # 다른 키포인트 추출본(--kp-dir)으로 규칙만 잴 때처럼 E 모델이 없으면 이 변형은 건너뜀
+            _log(f"fold {k}: {v} skipped ({ev} models not found in {mdir})")
+            continue
         t0 = time.time()
         runs_r = []
         for seed in seed_list:
             entry = _load_e_model(mdir, ev, seed)
-            if entry is None:
-                raise FileNotFoundError(f"fold {k}: {ev} seed {seed} model not found (run stage E first)")
             ver = _SWV(_e_scorer(entry, device), mode="max", model_id=f"{v}-s{seed}")
             outs = _evaluate(test_rows, clips, R.study_params("veto", lost_grace_s=LOST_GRACE_R1), ver)
             runs_r.append({"seed": seed, "outcomes": outs, "summary": R.summarize(outs), "threshold": DEFAULT_TH,
@@ -1956,6 +1958,8 @@ def _spawn_folds(args, fold_list: List[int], out_dir: Path) -> int:
                 cmd += ["--epochs", str(args.epochs)]
             if args.kp_dir:
                 cmd += ["--kp-dir", str(args.kp_dir)]
+            if args.switch_policy != "all":
+                cmd += ["--switch-policy", args.switch_policy]
             if args.skip_existing:
                 cmd += ["--skip-existing"]
             fh = open(log_dir / f"fold{k}.log", "a", encoding="utf-8")
@@ -1995,6 +1999,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--no-summary", action="store_true")
     ap.add_argument("--summarize-only", action="store_true")
     ap.add_argument("--fa-ref", default=DEFAULT_FA_REF, help="같은 오탐률(matched FA) 비교의 기준 변형")
+    ap.add_argument("--switch-policy", default="all", choices=("all", "multi"),
+                    help="대상 전환 정책 (all: 운영과 같음, multi: 후보 2명 이상일 때만 전환, 클립에 n_cand 필요)")
     ap.add_argument("--kp-dir", default=None,
                     help="키포인트 클립 폴더 (기본 dataset/_keypoints/v1). 다른 추출본으로 같은 실험을 돌릴 때는 --out도 따로 둘 것")
     args = ap.parse_args(argv)
@@ -2046,6 +2052,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             folds = FO.build_folds(rows)
             FO.save_folds(fpath, folds, meta={"n_folds": 5, "seed": 0, "manifest": str(args.manifest)})
         t0 = time.time()
+        from training.experiments import replay as _R
+        _R.SWITCH_POLICY = args.switch_policy
         clips = W.load_clips(rows, kp_dir=args.kp_dir)
         _log(f"loaded {len(clips)} clips in {time.time() - t0:.1f}s, device {device}")
         failed = 0

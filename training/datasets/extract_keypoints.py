@@ -66,12 +66,14 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
     - switched (T,): 그 프레임에서 대상이 바뀌었는지 (런타임 obs.target_switched와 같음: 직전 프레임에 대상이 있었고
       IoU >= iou_thresh인 후보가 없어 최고 신뢰도 후보로 바꾼 경우만 True. 놓친 뒤 다시 잡은 첫 프레임은 False)
     - n_switch = switched.sum()
+    - n_cand (T,): 프레임에서 검출된 사람 후보 수 (conf 이상). 대상 전환 정책(후보가 1명이면 전환으로 보지 않음) 비교용
     """
     ts: List[float] = []
     kps: List[np.ndarray] = []
     bbox: List[np.ndarray] = []
     present: List[bool] = []
     switched_l: List[bool] = []
+    n_cand_l: List[int] = []
     frame_wh: Optional[List[int]] = None
     last_bbox = None
     n_multi = 0
@@ -88,6 +90,7 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
             ts.append(len(ts) / fps)
             if len(boxes) > 1:
                 n_multi += 1
+            n_cand_l.append(int(len(boxes)))
             idx, switched = select_target_index(boxes, confs, last_bbox=last_bbox, iou_thresh=iou_thresh)
             switched_l.append(bool(switched) and idx is not None)
             if idx is None:
@@ -125,6 +128,7 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
         "frame_wh": frame_wh or [0, 0],
         "switched": sw,
         "n_switch": int(sw.sum()),
+        "n_cand": np.asarray(n_cand_l, np.int16),
         "n_multi": n_multi,
     }
 
@@ -211,7 +215,7 @@ def extract_one(row: Dict[str, Any], out_path: Path, predictor: Predictor, open_
     if with_hash:
         meta["video_sha256"] = sha256_file(video)
     save_clip(out_path, clip["ts"], clip["kps"], clip["bbox"], clip["present"], clip["frame_wh"], meta,
-              switched=clip["switched"])
+              switched=clip["switched"], n_cand=clip["n_cand"])
     return {"frames": t, "container_frames": container_frames, "native_fps": fps, "fps_source": fps_source,
             "present_ratio": round(present_ratio, 4), "switches": clip["n_switch"]}
 

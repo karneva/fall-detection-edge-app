@@ -335,3 +335,46 @@ class LiveSwitchParityTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(importlib.util.find_spec("numpy") is not None, "numpy 없음")
+class NCandTest(unittest.TestCase):
+    """프레임별 사람 후보 수(n_cand) 저장과 대상 전환 정책 (replay.effective_switched)"""
+
+    def _clip(self, switched, n_cand):
+        import numpy as np
+        t = len(switched)
+        return {"ts": np.arange(t) / 15.0, "kps": np.zeros((t, 17, 3), np.float32),
+                "bbox": np.zeros((t, 4), np.float32), "present": np.ones(t, bool), "frame_wh": [640, 480],
+                "switched": np.asarray(switched, bool), "n_cand": n_cand}
+
+    def test_roundtrip_and_validation(self):
+        import tempfile
+
+        import numpy as np
+
+        from training.datasets.clipfmt import load_clip, save_clip
+        c = self._clip([False, True, False], [1, 2, 0])
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "c.npz"
+            save_clip(p, c["ts"], c["kps"], c["bbox"], c["present"], c["frame_wh"], {}, switched=c["switched"],
+                      n_cand=c["n_cand"])
+            got = load_clip(p)
+            self.assertEqual(got["n_cand"].tolist(), [1, 2, 0])
+            save_clip(p, c["ts"], c["kps"], c["bbox"], c["present"], c["frame_wh"], {})
+            self.assertNotIn("n_cand", load_clip(p))
+            for bad in ([1, 2], [1, -1, 0], [0.5, 1, 1]):
+                with self.assertRaises(ValueError):
+                    save_clip(p, c["ts"], c["kps"], c["bbox"], c["present"], c["frame_wh"], {}, n_cand=np.array(bad))
+
+    def test_switch_policy(self):
+        from training.experiments import replay
+        c = self._clip([False, True, True, False], [1, 1, 2, 1])
+        self.assertEqual(replay.effective_switched(c, "all").tolist(), [False, True, True, False])
+        self.assertEqual(replay.effective_switched(c, "multi").tolist(), [False, False, True, False])
+        no_nc = dict(c)
+        no_nc.pop("n_cand")
+        self.assertEqual(replay.effective_switched(no_nc, "multi").tolist(), [False, True, True, False])
+        self.assertIsNone(replay.effective_switched({"ts": []}, "multi"))
+        with self.assertRaises(ValueError):
+            replay.effective_switched(c, "bogus")

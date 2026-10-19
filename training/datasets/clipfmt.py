@@ -12,6 +12,7 @@
   frame_wh  int32   (2,)       원본 [width, height] (픽셀)
   switched  bool    (T,)       (선택) 해당 프레임에서 추적 대상이 바뀌었는지 (런타임 obs.target_switched와 같은 정의).
                                예전 파일/sidecar 클립에는 없음 -> load_clip 결과에서 키 자체가 빠짐 (clip.get("switched") is None)
+  n_cand    int16   (T,)       (선택) 프레임에서 검출된 사람 후보 수 (대상 전환 정책 비교용, 예전 파일에는 없음)
   meta      0-d str            JSON (clip_format_version, dataset, clip_id, video, native_fps, n_frames,
                                extractor{model,conf,imgsz,select,ultralytics_version}, video_sha256?, created_at)
 
@@ -28,7 +29,7 @@ import numpy as np
 CLIP_FORMAT_VERSION = 1
 NUM_KPS = 17
 CLIP_KEYS = ("ts", "kps", "bbox", "present", "frame_wh", "meta")
-OPTIONAL_KEYS = ("switched",)
+OPTIONAL_KEYS = ("switched", "n_cand")
 
 
 def _now_iso() -> str:
@@ -47,7 +48,20 @@ def _as_switched(switched, t: int) -> np.ndarray:
     return arr
 
 
-def _as_arrays(ts, kps, bbox, present, frame_wh, switched=None) -> Dict[str, np.ndarray]:
+def _as_n_cand(n_cand, t: int) -> np.ndarray:
+    """n_cand -> int16 (T,) 0 이상. 길이가 다르거나 음수/정수가 아닌 값이 있으면 ValueError."""
+    arr = np.asarray(n_cand)
+    if arr.dtype.kind not in "iu" and not (arr.dtype.kind == "f" and np.all(np.mod(arr, 1) == 0)):
+        raise ValueError("n_cand must be integers")
+    arr = arr.astype(np.int64)
+    if arr.shape != (t,):
+        raise ValueError(f"n_cand shape {arr.shape} != ({t},)")
+    if np.any(arr < 0):
+        raise ValueError("n_cand must be >= 0")
+    return arr.astype(np.int16)
+
+
+def _as_arrays(ts, kps, bbox, present, frame_wh, switched=None, n_cand=None) -> Dict[str, np.ndarray]:
     """형식에 맞는 dtype으로 바꾸고 shape를 검사합니다. 어긋나면 ValueError. switched가 None이면 키를 넣지 않음."""
     ts = np.asarray(ts, dtype=np.float64).reshape(-1)
     t = ts.shape[0]
@@ -77,15 +91,17 @@ def _as_arrays(ts, kps, bbox, present, frame_wh, switched=None) -> Dict[str, np.
     out = {"ts": ts, "kps": kps, "bbox": bbox, "present": present, "frame_wh": frame_wh}
     if switched is not None:
         out["switched"] = _as_switched(switched, t)
+    if n_cand is not None:
+        out["n_cand"] = _as_n_cand(n_cand, t)
     return out
 
 
-def save_clip(path, ts, kps, bbox, present, frame_wh, meta: Dict[str, Any], switched=None) -> None:
+def save_clip(path, ts, kps, bbox, present, frame_wh, meta: Dict[str, Any], switched=None, n_cand=None) -> None:
     """
     클립 파일을 저장합니다 (검증 후 임시 파일에 쓰고 교체하므로 중단돼도 반쯤 쓴 파일이 남지 않음).
-    switched (T,) bool은 선택이며 None이면 파일에 쓰지 않습니다.
+    switched (T,) bool, n_cand (T,) int(프레임의 사람 후보 수)는 선택이며 None이면 파일에 쓰지 않습니다.
     """
-    arrays = _as_arrays(ts, kps, bbox, present, frame_wh, switched)
+    arrays = _as_arrays(ts, kps, bbox, present, frame_wh, switched, n_cand)
     meta = dict(meta or {})
     # 파생 값은 항상 실제 배열 기준으로 덮어씀 (잘라낸 클립을 다시 저장할 때 예전 값이 남지 않도록)
     meta["clip_format_version"] = CLIP_FORMAT_VERSION
@@ -122,9 +138,11 @@ def load_clip(path) -> Dict[str, Any]:
     ver = int(meta.get("clip_format_version", 0))
     if ver > CLIP_FORMAT_VERSION:
         raise ValueError(f"clip_format_version {ver} is newer than supported {CLIP_FORMAT_VERSION}")
-    checked = _as_arrays(out["ts"], out["kps"], out["bbox"], out["present"], out["frame_wh"], out.get("switched"))
-    if "switched" in checked:
-        out["switched"] = checked["switched"]
+    checked = _as_arrays(out["ts"], out["kps"], out["bbox"], out["present"], out["frame_wh"], out.get("switched"),
+                         out.get("n_cand"))
+    for k in OPTIONAL_KEYS:
+        if k in checked:
+            out[k] = checked[k]
     out["meta"] = meta
     return out
 
@@ -290,4 +308,4 @@ def from_sidecar(sidecar: Dict[str, Any], **meta: Any) -> Dict[str, Any]:
 def save_clip_dict(path, clip: Dict[str, Any]) -> None:
     """from_obs_records/from_sidecar/load_clip 결과를 그대로 저장합니다 (switched가 있으면 함께)."""
     save_clip(path, clip["ts"], clip["kps"], clip["bbox"], clip["present"], clip["frame_wh"], clip["meta"],
-              switched=clip.get("switched"))
+              switched=clip.get("switched"), n_cand=clip.get("n_cand"))

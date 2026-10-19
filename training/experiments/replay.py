@@ -43,6 +43,10 @@ logger = logging.getLogger(__name__)
 
 RUNTIME_HZ = 15.0
 FREEZE_TAIL_S = 20.0
+# 대상 전환 정책: "all" = 클립의 switched 그대로 (운영 target_select와 같음),
+# "multi" = 사람 후보가 2명 이상인 프레임의 전환만 인정 (후보 1명이면 같은 사람으로 봄, 로드맵 R2).
+# multi인데 클립에 n_cand가 없으면 all과 같음. run_progression --switch-policy가 바꿈 (재생 전체에 공통).
+SWITCH_POLICY = "all"
 DEFAULT_T0 = 1000.0
 
 # 시간 기준 탐지(제때 탐지) 판정 창: ABNORMAL 진입/LEVEL1이 [fall_start - PRE, fall_end + POST] 안인지 (MODEL_STUDY와 같은 값)
@@ -193,7 +197,7 @@ def clip_to_obs(clip: Dict[str, Any], hz: float = RUNTIME_HZ, tail_s: float = FR
     n_tail = int(round(float(tail_s) * float(hz))) if tail_s and tail_s > 0 else 0
     sources = [int(i) for i in idx] + [int(idx[-1])] * n_tail
     n_main = len(idx)
-    sw_main = _switch_flags(clip.get("switched"), idx, t)
+    sw_main = _switch_flags(effective_switched(clip), idx, t)
     t_last = float(ts[idx[-1]])
     times = [float(t0) + float(ts[i]) for i in idx] + [
         float(t0) + t_last + (j + 1) / float(hz) for j in range(n_tail)]
@@ -211,6 +215,21 @@ def clip_to_obs(clip: Dict[str, Any], hz: float = RUNTIME_HZ, tail_s: float = FR
         # 다음 사용자(다른 클립, 운영 코드)가 이전 클립의 EMA 상태를 물려받지 않도록
         _smoothing._reset_ema_state()
     return out
+
+
+def effective_switched(clip: Dict[str, Any], policy: Optional[str] = None) -> Optional[np.ndarray]:
+    """정책을 적용한 프레임별 대상 전환 (클립에 switched가 없으면 None)"""
+    sw = clip.get("switched")
+    if sw is None:
+        return None
+    policy = policy or SWITCH_POLICY
+    if policy not in ("all", "multi"):
+        raise ValueError(f"switch policy must be 'all' or 'multi': {policy!r}")
+    sw = np.asarray(sw, dtype=bool)
+    nc = clip.get("n_cand")
+    if policy == "multi" and nc is not None and len(nc) == len(sw):
+        sw = sw & (np.asarray(nc) >= 2)
+    return sw
 
 
 def _switch_flags(switched, idx: np.ndarray, t: int) -> np.ndarray:
