@@ -45,7 +45,7 @@ WANFALL_PLAN: Dict[str, Tuple[int, Tuple[float, ...]]] = {
 FIGSHARE_POS = (0.5, 0.95)
 
 __all__ = ["COCO_FLIP_IDX", "WANFALL_PLAN", "plan_wanfall", "plan_figshare", "split_by_video", "yolo_label_lines",
-           "read_frames", "build_dataset", "write_data_yaml"]
+           "read_frames", "build_dataset", "write_data_yaml", "dedupe_label_lines"]
 
 Item = Dict[str, Any]   # {"video": 경로, "frac": 영상 길이 비율, "group": 영상 id, "source": ..., "cls": ...}
 
@@ -105,6 +105,24 @@ def yolo_label_lines(persons: Sequence[Dict[str, Any]], w: int, h: int, vis_th: 
                 vals += [0.0, 0.0, 0]
         lines.append("0 " + " ".join(f"{v:.6f}" if isinstance(v, float) else str(v) for v in vals))
     return lines
+
+
+def dedupe_label_lines(lines: Sequence[str], contain_th: float = 0.7) -> List[str]:
+    """
+    이미 쓴 YOLO 라벨 줄에서 같은 사람의 중복(한 상자가 다른 상자 안에 거의 들어감)을 제거하고 큰 상자를 남김.
+    merge_rotations에 포함 기준을 넣기 전에 만든 데이터셋을 고칠 때 씀.
+    """
+    from training.pose.pseudo import io_min
+    boxes = []
+    for ln in lines:
+        v = [float(x) for x in ln.split()[1:5]]
+        boxes.append(np.array([v[0] - v[2] / 2, v[1] - v[3] / 2, v[0] + v[2] / 2, v[1] + v[3] / 2]))
+    order = sorted(range(len(lines)), key=lambda i: -(boxes[i][2] - boxes[i][0]) * (boxes[i][3] - boxes[i][1]))
+    kept: List[int] = []
+    for i in order:
+        if all(io_min(boxes[i], boxes[j]) < contain_th for j in kept):
+            kept.append(i)
+    return [lines[i] for i in sorted(kept)]
 
 
 def read_frames(video: str, fracs: Sequence[float]) -> Dict[float, np.ndarray]:

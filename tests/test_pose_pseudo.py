@@ -15,9 +15,9 @@ if HAS_NUMPY:
     import numpy as np
 
     from training.pose import rotation as RT
-    from training.pose.dataset import split_by_video, yolo_label_lines
+    from training.pose.dataset import dedupe_label_lines, split_by_video, yolo_label_lines
     from training.pose.evalset import coco_to_yolo, to_coco
-    from training.pose.pseudo import detect_rotations, iou, keep_person, merge_rotations
+    from training.pose.pseudo import detect_rotations, io_min, iou, keep_person, merge_rotations
 
 
 @unittest.skipUnless(HAS_NUMPY, "numpy 없음")
@@ -89,6 +89,22 @@ class PseudoTest(unittest.TestCase):
             np.testing.assert_allclose(d["box"], true_box)
             np.testing.assert_allclose(d["kps"][0, :2], [15.0, 10.0])
         self.assertEqual(merge_rotations(dets)[0]["angle"], 90)
+
+    def test_merge_drops_contained_duplicate(self):
+        """회전 방향마다 같은 사람의 전신과 상반신이 따로 잡힌 경우: 작은 상자가 큰 상자 안이면 하나만 남김"""
+        full = _person([0, 0, 100, 40], 0.9, angle=270)
+        upper = _person([50, 0, 100, 30], 0.95, angle=180)
+        self.assertLess(iou(full["box"], upper["box"]), 0.5)
+        self.assertGreaterEqual(io_min(full["box"], upper["box"]), 0.7)
+        self.assertEqual(len(merge_rotations([full, upper])), 1)
+        other = _person([200, 0, 240, 40], 0.8)
+        self.assertEqual(len(merge_rotations([full, upper, other])), 2)
+
+    def test_dedupe_label_lines(self):
+        full = yolo_label_lines([_person([0, 0, 100, 40], 0.9)], 300, 100)[0]
+        upper = yolo_label_lines([_person([50, 0, 100, 30], 0.9)], 300, 100)[0]
+        other = yolo_label_lines([_person([200, 0, 240, 40], 0.9)], 300, 100)[0]
+        self.assertEqual(dedupe_label_lines([upper, full, other]), [full, other])
 
     def test_keep_person(self):
         self.assertTrue(keep_person(_person([0, 0, 10, 20], 0.6)))

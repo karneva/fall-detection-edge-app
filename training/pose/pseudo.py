@@ -13,7 +13,7 @@ import numpy as np
 
 from training.pose.rotation import ANGLES, box_from_rotated, from_rotated
 
-__all__ = ["Person", "iou", "detect_rotations", "merge_rotations", "keep_person", "TeacherTTA"]
+__all__ = ["Person", "iou", "io_min", "detect_rotations", "merge_rotations", "keep_person", "TeacherTTA"]
 
 Person = Dict[str, Any]   # {"box": (4,) 원본 픽셀, "conf": float, "kps": (17, 3) 원본 픽셀 x, y, conf, "angle": int}
 
@@ -25,6 +25,15 @@ def iou(a: np.ndarray, b: np.ndarray) -> float:
     inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
     ua = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
     return float(inter / ua) if ua > 0 else 0.0
+
+
+def io_min(a: np.ndarray, b: np.ndarray) -> float:
+    """교집합 / 작은 상자 넓이 (한 상자가 다른 상자 안에 거의 들어가면 1에 가까움)"""
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    small = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+    return float(inter / small) if small > 0 else 0.0
 
 
 def _score(p: Person) -> float:
@@ -49,12 +58,16 @@ def detect_rotations(predict, img: np.ndarray, angles: Sequence[int] = ANGLES) -
     return out
 
 
-def merge_rotations(dets: List[Person], iou_th: float = 0.5) -> List[Person]:
-    """같은 사람(원본 좌표 상자 IoU >= iou_th) 검출을 묶어 사람마다 점수가 가장 높은 하나만 남김 (점수순)"""
+def merge_rotations(dets: List[Person], iou_th: float = 0.5, contain_th: float = 0.7) -> List[Person]:
+    """
+    같은 사람 검출을 묶어 사람마다 점수가 가장 높은 하나만 남김 (점수순).
+    같은 사람 = 원본 좌표 상자 IoU >= iou_th, 또는 한 상자가 다른 상자 안에 거의 들어감 (교집합/작은 상자 >= contain_th:
+    회전한 방향에서 같은 사람의 상반신만 따로 잡히는 경우)
+    """
     dets = sorted(dets, key=_score, reverse=True)
     kept: List[Person] = []
     for d in dets:
-        if all(iou(d["box"], k["box"]) < iou_th for k in kept):
+        if all(iou(d["box"], k["box"]) < iou_th and io_min(d["box"], k["box"]) < contain_th for k in kept):
             kept.append(d)
     return kept
 
