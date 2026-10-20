@@ -51,6 +51,9 @@ SWITCH_POLICY = "all"
 # 대상 전환도 폴백 없는 추적(switched_base)을 씀 -> 폴백 없이 추출한 것과 같음. 클립에 fallback 키가 없으면 영향 없음.
 # run_progression --no-fallback이 바꿈.
 USE_FALLBACK = True
+# study_params 공통 덮어쓰기 (재생 전체에 공통, 예: {"lost_grace_s": 0.5}). run_progression --lost-grace가 바꿈.
+# study_params에 직접 준 값이 이보다 우선 (R 단계의 lost_grace_s 등).
+STUDY_OVERRIDES: Dict[str, Any] = {}
 DEFAULT_T0 = 1000.0
 
 # 시간 기준 탐지(제때 탐지) 판정 창: ABNORMAL 진입/LEVEL1이 [fall_start - PRE, fall_end + POST] 안인지 (MODEL_STUDY와 같은 값)
@@ -64,7 +67,7 @@ NUM_KPS = 17
 _TS_EPS = 1e-6
 
 __all__ = [
-    "RUNTIME_HZ", "FREEZE_TAIL_S", "DEFAULT_T0", "TIMELY_PRE_S", "TIMELY_POST_S", "DEFAULT_KP_DIR",
+    "RUNTIME_HZ", "FREEZE_TAIL_S", "STUDY_OVERRIDES", "DEFAULT_T0", "TIMELY_PRE_S", "TIMELY_POST_S", "DEFAULT_KP_DIR",
     "study_params", "resample_indices", "clip_to_obs", "clip_end_s", "run_clip", "clip_outcome", "timing",
     "fall_intervals",
     "summarize",
@@ -109,7 +112,9 @@ def study_params(ai_mode: str = "off", **overrides: Any) -> Level1Params:
     """
     실험용 Level1Params. 환경변수(ABNORMAL_TIMEOUT_S, AI_* 등)에 따라 바뀌는 기본값을 코드 기본값으로 고정해
     어느 PC/셸에서 돌려도 같은 규칙으로 재생되게 합니다 (tests/test_level1_golden.py와 같은 값).
-    overrides로 개별 값 변경 (예: ai_suppress_pfall_th=0.3).
+    lost_grace_s(R1)는 0.0, post_alarm_latch(LEVEL1 이후 재진입 래치)는 False로 고정: 운영 기본값이 바뀌어도
+    이전 단계(A~G, p7b_*, p8_full) 결과가 그대로 재현되도록 (래치는 첫 LEVEL1 이후 이벤트만 바꿈).
+    우선순위: 고정값 < STUDY_OVERRIDES (모듈 전역, 러너 --lost-grace) < overrides (예: ai_suppress_pfall_th=0.3).
     """
     base: Dict[str, Any] = dict(
         ai_mode=ai_mode,
@@ -118,7 +123,10 @@ def study_params(ai_mode: str = "off", **overrides: Any) -> Level1Params:
         ai_suppress_pfall_th=0.4,
         ai_escalate_s=60.0,
         ai_escalate_requires_drop=True,
+        lost_grace_s=0.0,
+        post_alarm_latch=False,
     )
+    base.update(STUDY_OVERRIDES)
     base.update(overrides)
     return Level1Params(**base)
 

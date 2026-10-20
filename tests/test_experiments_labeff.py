@@ -7,6 +7,7 @@ L 단계(라벨 효율)와 같은 오탐률(matched FA) 비교 테스트 (traini
 import importlib.util
 import json
 import logging
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -130,15 +131,18 @@ class MatchedFATest(unittest.TestCase):
                ("adl", True, 0.6), ("adl", True, 0.3), ("adl", True, None), ("adl", False, None)]
         self.assertEqual(RP.sim_rates(pts, RP.NO_VETO), (0.75, 0.75))
         self.assertEqual(RP.sim_rates(pts, 0.4), (0.5, 0.5))
-        # 오탐률 0.5 이하가 되는 가장 작은 임계값 = 0.3 (ADL 0.3 억제), recall 0.5 (0.2 낙상도 억제)
+        # 오탐률 0.5 이하가 되는 가장 작은 임계값 = 0.3 바로 위 (엄격 경계 p_fall < th에서 ADL 0.3 억제),
+        # recall 0.5 (0.2 낙상도 억제)
         m = RP.match_fa_threshold(pts, 0.5)
-        self.assertEqual((m["threshold"], m["recall"], m["adl_fa_rate"], m["matched"]), (0.3, 0.5, 0.5, True))
+        self.assertEqual((m["threshold"], m["recall"], m["adl_fa_rate"], m["matched"]),
+                         (math.nextafter(0.3, math.inf), 0.5, 0.5, True))
+        self.assertEqual(RP.sim_rates(pts, 0.3), (0.5, 0.75))  # th == 0.3이면 ADL 0.3은 알람 (엔진과 같음)
         m = RP.match_fa_threshold(pts, 0.9)
         self.assertEqual((m["threshold"], m["recall"]), (RP.NO_VETO, 0.75))
         # 판단 불가(fail-open) ADL 알람 때문에 0.25 아래로는 못 내려감
         m = RP.match_fa_threshold(pts, 0.1)
         self.assertFalse(m["matched"])
-        self.assertEqual((m["threshold"], m["adl_fa_rate"], m["recall"]), (0.9, 0.25, 0.0))
+        self.assertEqual((m["threshold"], m["adl_fa_rate"], m["recall"]), (math.nextafter(0.9, math.inf), 0.25, 0.0))
 
     def test_ai_points_use_reached_not_post_veto_alarm(self):
         o = _o("a", "fall", 0.3)  # veto로 억제됨

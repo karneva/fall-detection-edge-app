@@ -7,6 +7,7 @@ progression study 실행기(training/experiments/run_progression.py) 테스트
 import importlib.util
 import json
 import logging
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -71,19 +72,47 @@ class ThresholdTest(unittest.TestCase):
     def test_threshold_keeps_all_val_falls(self):
         ps = [0.31, 0.8, 0.55]
         th = RP.select_threshold(ps)
-        self.assertTrue(all(p > th for p in ps))  # 억제 조건은 p_fall <= th
+        self.assertTrue(all(p >= th for p in ps))  # 억제 조건은 p_fall < th (엔진과 같은 엄격 경계)
 
     def test_sim_balanced_and_balanced_threshold(self):
         pts = [("fall", True, 0.9), ("fall", True, 0.6), ("fall", False, None),
                ("adl", True, 0.2), ("adl", True, 0.5), ("adl", False, None)]
         # th 0: 알람 그대로 -> recall 2/3, 오탐 2/3
         self.assertAlmostEqual(RP.sim_balanced(pts, 0.0), 2 * (2 / 3) * (1 / 3) / 1.0)
-        # th 0.5: ADL 두 개 억제, 낙상 유지 -> recall 2/3, 특이도 1
-        self.assertAlmostEqual(RP.sim_balanced(pts, 0.5), 2 * (2 / 3) / (2 / 3 + 1))
-        self.assertAlmostEqual(RP.select_threshold_balanced(pts), 0.5)
+        # th 0.5 바로 위: ADL 두 개 억제, 낙상 유지 -> recall 2/3, 특이도 1
+        up = math.nextafter(0.5, math.inf)
+        self.assertAlmostEqual(RP.sim_balanced(pts, up), 2 * (2 / 3) / (2 / 3 + 1))
+        # th == 0.5: 엄격 경계라 p 0.5 ADL은 억제 안 됨 -> 오탐 1/3
+        self.assertAlmostEqual(RP.sim_balanced(pts, 0.5), 2 * (2 / 3) * (2 / 3) / (4 / 3))
+        # 고른 임계값은 그 p를 낸 클립까지 억제하도록 1 ulp 위
+        self.assertEqual(RP.select_threshold_balanced(pts), up)
         # p_fall 없는 클립(판단 불가)은 규칙 결과 유지
         self.assertIsNone(RP.sim_balanced([("fall", True, 0.9)], 0.5))
         self.assertEqual(RP.select_threshold_balanced([], default=0.4), 0.4)
+
+    def test_sim_no_veto_at_or_below_zero(self):
+        # 엔진과 같이 th <= 0이면 veto 꺼짐 (p_fall 0.0도 억제 안 됨)
+        pts = [("fall", True, 0.0), ("adl", True, 0.0)]
+        for th in (0.0, -1.0, RP.NO_VETO):
+            self.assertEqual(RP.sim_rates(pts, th), (1.0, 1.0))
+        self.assertEqual(RP.sim_rates(pts, math.nextafter(0.0, math.inf)), (0.0, 0.0))
+
+    def test_sim_matches_engine_boundary(self):
+        # th == p, 그 바로 아래/위에서 근사 알람 여부가 Level1Engine._verify_with_ai의 억제 여부와 같음
+        from app.core.level1 import Level1Engine, Level1Params
+        for p in (0.0, 0.3, 0.4, 0.5, 1.0):
+            for th in (p, math.nextafter(p, math.inf), math.nextafter(p, -math.inf), 0.0, -1.0):
+                eng = Level1Engine(Level1Params(ai_mode="veto", ai_suppress_pfall_th=th), verifier=lambda s, p=p: p)
+                for i in range(30):
+                    eng.kp_seq.append([0.0] * 51)
+                    eng.kp_ts.append(i / 10.0)
+                ai = eng._verify_with_ai(3.0)
+                self.assertEqual(ai["p_fall"], p)
+                engine_alarm = not ai["suppress"]
+                r, fa = RP.sim_rates([("fall", True, p), ("adl", True, p)], th)
+                self.assertEqual((r == 1.0, fa == 1.0), (engine_alarm, engine_alarm), (p, th))
+                pts = [("fall", True, p), ("adl", False, None)]
+                self.assertEqual(RP.sim_balanced(pts, th) == 1.0, engine_alarm, (p, th))
 
     def test_auc(self):
         self.assertEqual(RP.auc_mann_whitney([0.9, 0.8], [0.1, 0.2]), 1.0)
@@ -138,6 +167,59 @@ class AggregateTest(unittest.TestCase):
         json.dumps(s)  # 직렬화 가능
 
 
+class SpawnArgsTest(unittest.TestCase):
+    """fold 하위 프로세스에 앞단 설정(--switch-policy, --no-fallback, --lost-grace)이 전달되는지 (프로세스는 가짜)"""
+
+    def _cmds(self, **kw):
+        import argparse
+        from unittest import mock
+
+        cmds = []
+
+        class _P:
+            def __init__(self, cmd, **_):
+                cmds.append(cmd)
+
+            def poll(self):
+                return 0
+
+        base = dict(stages_list=["A"], seeds=1, device="cpu", f_margin=0.05, hgb_iter=5, manifest="m.jsonl",
+                    folds_file="f.json", epochs=None, kp_dir=None, switch_policy="all", no_fallback=False,
+                    lost_grace=None, skip_existing=False, jobs=2)
+        base.update(kw)
+        with tempfile.TemporaryDirectory() as td,                 mock.patch.object(RP.subprocess, "Popen", _P), mock.patch.object(RP.time, "sleep", lambda s: None),                 mock.patch.object(RP, "_log", lambda m: None):
+            failed = RP._spawn_folds(argparse.Namespace(**base), [0, 1], Path(td))
+        self.assertEqual(failed, 0)
+        self.assertEqual(len(cmds), 2)
+        return cmds
+
+    def test_default_has_no_frontend_flags(self):
+        for cmd in self._cmds():
+            self.assertNotIn("--lost-grace", cmd)
+            self.assertNotIn("--switch-policy", cmd)
+            self.assertNotIn("--no-fallback", cmd)
+
+    def test_frontend_flags_passed(self):
+        for cmd in self._cmds(switch_policy="multi", no_fallback=True, lost_grace=0.5):
+            i = cmd.index("--lost-grace")
+            self.assertEqual(float(cmd[i + 1]), 0.5)
+            self.assertEqual(cmd[cmd.index("--switch-policy") + 1], "multi")
+            self.assertIn("--no-fallback", cmd)
+
+    def test_markdown_shows_frontend(self):
+        md = RP.render_markdown({"meta": {"protocol": "p", "frontend": {"kp_dir": "kp", "switch_policy": "multi",
+                                                                         "use_fallback": True, "lost_grace_s": 0.5,
+                                                                         "post_alarm_latch": False}},
+                                 "variants": {}})
+        self.assertIn("lost_grace_s 0.5", md)
+        self.assertIn("post_alarm_latch False", md)
+        # 래치 기록이 없는 옛 meta는 앞단 줄이 그대로
+        md = RP.render_markdown({"meta": {"protocol": "p", "frontend": {"kp_dir": "kp", "switch_policy": "multi",
+                                                                         "use_fallback": True, "lost_grace_s": 0.5}},
+                                 "variants": {}})
+        self.assertNotIn("post_alarm_latch", md)
+
+
 @unittest.skipUnless(HAS_STACK, "numpy/torch/sklearn not installed")
 class RunFoldSmokeTest(unittest.TestCase):
     """합성 클립 12개로 모든 단계를 1 epoch 돌려 결과 파일/형식을 확인 (CPU)."""
@@ -187,6 +269,10 @@ class RunFoldSmokeTest(unittest.TestCase):
                 self.assertEqual(d["variant"], v)
                 self.assertEqual(len(d["runs"]), 1)
                 self.assertEqual(len(d["runs"][0]["outcomes"]), n_test)
+                # 앞단 설정 기록: 기본 lost_grace 0.0 고정, R 변형만 0.5
+                self.assertEqual(d["frontend"]["lost_grace_s"], RP.LOST_GRACE_R1 if v in RP.STAGE_VARIANTS["R"]
+                                 else 0.0, v)
+                self.assertIs(d["frontend"]["post_alarm_latch"], False, v)  # study_params 고정값
             for v in ("E1", "E2"):
                 self.assertTrue((out / "fold0" / "models" / f"{v}_s0.pt").exists())
             self.assertTrue((out / "fold0" / "models" / "E0_s0.pkl").exists())

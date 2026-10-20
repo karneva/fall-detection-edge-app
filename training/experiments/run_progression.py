@@ -248,7 +248,7 @@ def parse_stages(spec: str) -> List[str]:
 def select_threshold(fall_p: Sequence[float], margin: float = F_MARGIN, default: float = DEFAULT_TH,
                      th_max: float = F_TH_MAX) -> float:
     """
-    검증 낙상 클립의 첫 p_fall 목록 -> 억제 임계값 (p_fall <= th면 억제).
+    검증 낙상 클립의 첫 p_fall 목록 -> 억제 임계값 (엔진과 같이 p_fall < th면 억제, th <= 0이면 억제 없음).
     모든 검증 낙상이 통과하는(recall 1.0) 가장 큰 임계값 min(p)에서 margin을 뺀 값, [0, th_max]로 자름.
     값이 없으면 default.
     """
@@ -558,7 +558,18 @@ def keep_positive_mask(meta: Sequence[Dict[str, Any]], y: Sequence[int], kept_cl
 # 같은 오탐률 비교 (matched FA, 표준 라이브러리만)
 # ---------------------------------------------------------------------------
 
-NO_VETO = -1.0  # 아무것도 억제하지 않는 임계값 (p_fall >= 0)
+NO_VETO = -1.0  # 아무것도 억제하지 않는 임계값 (엔진과 같이 th <= 0이면 veto 꺼짐)
+
+
+def _suppress_cand(p: float) -> float:
+    """클립 p_fall p를 억제하는 가장 작은 임계값 (엔진 경계 p_fall < th에서 p 바로 위 값, 1 ulp)"""
+    return math.nextafter(float(p), math.inf)
+
+
+def _sim_hit(alarm: bool, p: Optional[float], th: float) -> bool:
+    """근사 알람 여부: 엔진(Level1Engine._verify_with_ai)과 같은 경계. p_fall < th면 억제, th <= 0이면 억제 없음,
+    p_fall이 없으면(판단 불가) fail-open으로 알람"""
+    return bool(alarm) and (p is None or th <= 0 or float(p) >= th)
 
 
 def ai_points(outcomes: Iterable[Dict[str, Any]]) -> List[Tuple[str, bool, Optional[float]]]:
@@ -573,12 +584,13 @@ def ai_points(outcomes: Iterable[Dict[str, Any]]) -> List[Tuple[str, bool, Optio
 def sim_rates(points: Sequence[Tuple[str, bool, Optional[float]]], th: float
               ) -> Tuple[Optional[float], Optional[float]]:
     """
-    임계값 th의 veto를 근사한 (recall, ADL 오탐률): 첫 AI 호출 p_fall <= th면 억제, p_fall이 없으면(판단 불가)
-    fail-open으로 알람. 억제 뒤 재진입/승격 알람은 무시하는 근사. 한쪽 클립이 없으면 그쪽은 None.
+    임계값 th의 veto를 근사한 (recall, ADL 오탐률): 첫 AI 호출 p_fall < th면 억제 (엔진과 같은 엄격 경계,
+    th <= 0이면 억제 없음), p_fall이 없으면(판단 불가) fail-open으로 알람. 억제 뒤 재진입/승격 알람은 무시하는 근사.
+    한쪽 클립이 없으면 그쪽은 None.
     """
     n_f = n_a = det = fa = 0
     for lab, alarm, p in points:
-        hit = bool(alarm) and (p is None or p > th)
+        hit = _sim_hit(alarm, p, th)
         if lab == "fall":
             n_f += 1
             det += hit
@@ -592,10 +604,10 @@ def match_fa_threshold(points: Sequence[Tuple[str, bool, Optional[float]]], targ
                        eps: float = 1e-9) -> Dict[str, Any]:
     """
     근사 ADL 오탐률이 target_fa 이하가 되는 가장 작은 임계값(= recall이 가장 큰 쪽)과 그때의 recall/오탐률.
-    후보 = 억제 없음(NO_VETO)과 클립 첫 p_fall 값들. 모든 p를 억제해도 target을 못 맞추면(판단 불가 알람이
-    많을 때) 가장 큰 후보를 쓰고 matched=False.
+    후보 = 억제 없음(NO_VETO)과 클립 첫 p_fall 바로 위 값들 (nextafter: 엄격 경계에서도 그 클립까지 억제).
+    모든 p를 억제해도 target을 못 맞추면(판단 불가 알람이 많을 때) 가장 큰 후보를 쓰고 matched=False.
     """
-    cands = [NO_VETO] + sorted({float(p) for _, _, p in points if p is not None})
+    cands = [NO_VETO] + sorted({_suppress_cand(p) for _, _, p in points if p is not None})
     th, r, fa = NO_VETO, None, None
     for th in cands:
         r, fa = sim_rates(points, th)
@@ -765,6 +777,11 @@ def render_markdown(summary: Dict[str, Any]) -> str:
         lines.append(f"- 평가: {meta.get('protocol', '')}")
         if meta.get("folds") is not None:
             lines.append(f"- folds: {meta.get('folds')}, seeds per NN stage: {meta.get('seeds')}")
+        fe = meta.get("frontend")
+        if isinstance(fe, dict):
+            lines.append(f"- 앞단: kp_dir {fe.get('kp_dir')}, switch_policy {fe.get('switch_policy')}, "
+                         f"fallback {fe.get('use_fallback')}, lost_grace_s {fe.get('lost_grace_s')}"
+                         + (f", post_alarm_latch {fe.get('post_alarm_latch')}" if "post_alarm_latch" in fe else ""))
     lines.append("- pooled = 5개 test fold를 합친 값 (seed 평균), fold = fold별 값의 평균 ± 표본 표준편차")
     lines.append("- 억제된 실제 낙상 = AI가 거부해 끝내 알람이 없었던 낙상 클립 수 (pooled, seed 평균)")
     lines.append("- 규칙 상한 = 규칙 엔진이 LEVEL1 판정까지 간 낙상 클립 비율 (AI는 거부권만 있어 recall은 이 값을 넘지 못함)")
@@ -920,7 +937,7 @@ def _render_matched_fa(mfa: Dict[str, Any]) -> List[str]:
     lines = [f"## 같은 오탐률에서의 recall (기준 {ref}, oracle 비교: 모델 순위용)", "",
              f"- seed마다 5개 test fold를 합쳐, 첫 AI 호출 p_fall의 억제 임계값을 test 결과로 골라 근사 ADL 오탐률을 "
              f"{ref}(같은 seed)의 근사 오탐률 이하로 맞춤. test로 고른 임계값이라 운영 임계값이나 성능 추정이 아님",
-             "- 근사: 첫 AI 호출 p_fall <= 임계값이면 억제, p_fall이 없으면 알람(fail-open). 억제 뒤 재진입/승격 알람은 "
+             "- 근사: 첫 AI 호출 p_fall < 임계값이면 억제 (엔진과 같은 경계), p_fall이 없으면 알람(fail-open). 억제 뒤 재진입/승격 알람은 "
              "무시하므로 실제 재생 값과 다를 수 있음 (자기 근사 vs 실제 열 참고)",
              "- 값은 seed 평균. 임계값은 평균 (최소~최대), '억제 없음'은 억제하지 않아도 이미 오탐률이 기준 이하인 경우",
              "",
@@ -1233,8 +1250,13 @@ def run_fold(k: int, rows: List[Dict[str, Any]], folds: Dict[str, int], clips: D
             return True
         return False
 
+    # 재생 앞단 설정 (fold 결과마다 기록: 다른 설정으로 돌린 결과를 섞지 않도록)
+    frontend = {"switch_policy": R.SWITCH_POLICY, "use_fallback": bool(R.USE_FALLBACK),
+                "lost_grace_s": float(p_off.lost_grace_s), "post_alarm_latch": bool(p_off.post_alarm_latch)}
+
     def save(variant, res):
         res.update({"variant": variant, "fold": k, "n_test": len(test_rows)})
+        res.setdefault("frontend", frontend)
         _write_json(fdir / f"{variant}.json", res)
         results[variant] = res
         s = R.summarize([o for run in res["runs"] for o in run["outcomes"]])
@@ -1680,6 +1702,7 @@ def run_fold(k: int, rows: List[Dict[str, Any]], folds: Dict[str, int], clips: D
         t0 = time.time()
         outs = _evaluate(test_rows, clips, R.study_params("off", lost_grace_s=LOST_GRACE_R1))
         save("AR1", {"params": None, "lost_grace_s": LOST_GRACE_R1,
+                     "frontend": dict(frontend, lost_grace_s=LOST_GRACE_R1),
                      "runs": [{"seed": None, "outcomes": outs, "summary": R.summarize(outs), "threshold": None}],
                      "time_s": time.time() - t0})
     r_needed = [vv for vv in ("E0maxR1", "E1maxR1") if "R" in stages and not done(vv)]
@@ -1700,6 +1723,7 @@ def run_fold(k: int, rows: List[Dict[str, Any]], folds: Dict[str, int], clips: D
             runs_r.append({"seed": seed, "outcomes": outs, "summary": R.summarize(outs), "threshold": DEFAULT_TH,
                            "verifier": ver.stats()})
         save(v, {"params": None, "lost_grace_s": LOST_GRACE_R1, "base": f"{ev}max", "runs": runs_r,
+                 "frontend": dict(frontend, lost_grace_s=LOST_GRACE_R1),
                  "time_s": time.time() - t0})
     return results
 
@@ -1829,12 +1853,13 @@ def val_points(val_outs: List[Dict[str, Any]]) -> List[Tuple[str, bool, Optional
 
 def sim_balanced(points: Sequence[Tuple[str, bool, Optional[float]]], th: float) -> Optional[float]:
     """
-    shadow 재생 결과로 임계값 th의 veto 결과를 근사 (첫 AI 호출 p_fall <= th면 억제, 억제 후 재진입은 무시).
-    p_fall이 없으면(판단 불가) 규칙 결과 유지. 반환: recall과 (1 - ADL 오탐률)의 조화평균 (한쪽 클립이 없으면 None).
+    shadow 재생 결과로 임계값 th의 veto 결과를 근사 (첫 AI 호출 p_fall < th면 억제, th <= 0이면 억제 없음:
+    엔진과 같은 경계. 억제 후 재진입은 무시). p_fall이 없으면(판단 불가) 규칙 결과 유지.
+    반환: recall과 (1 - ADL 오탐률)의 조화평균 (한쪽 클립이 없으면 None).
     """
     n_f = n_a = det = fa = 0
     for lab, alarm, p in points:
-        hit = bool(alarm) and (p is None or p > th)
+        hit = _sim_hit(alarm, p, th)
         if lab == "fall":
             n_f += 1
             det += hit
@@ -1850,10 +1875,11 @@ def sim_balanced(points: Sequence[Tuple[str, bool, Optional[float]]], th: float)
 def select_threshold_balanced(points: Sequence[Tuple[str, bool, Optional[float]]], default: float = DEFAULT_TH,
                               th_max: float = F_TH_MAX) -> float:
     """
-    검증 balanced(sim_balanced)가 가장 큰 임계값. 후보 = 0과 검증 클립 p_fall 값들 (th_max 이하).
-    동률이면 가장 작은 임계값 (덜 억제 = recall 쪽으로 안전). 계산할 수 없으면 default.
+    검증 balanced(sim_balanced)가 가장 큰 임계값. 후보 = 0(억제 없음)과 검증 클립 p_fall 바로 위 값들
+    (nextafter: 엄격 경계에서도 그 클립까지 억제, th_max 이하). 동률이면 가장 작은 임계값 (덜 억제 = recall 쪽으로
+    안전). 계산할 수 없으면 default.
     """
-    cands = sorted({0.0} | {float(p) for _, _, p in points if p is not None and float(p) <= th_max})
+    cands = sorted({0.0} | {c for c in (_suppress_cand(p) for _, _, p in points if p is not None) if c <= th_max})
     best_th, best = None, None
     for th in cands:
         b = sim_balanced(points, th)
@@ -1962,6 +1988,8 @@ def _spawn_folds(args, fold_list: List[int], out_dir: Path) -> int:
                 cmd += ["--switch-policy", args.switch_policy]
             if args.no_fallback:
                 cmd += ["--no-fallback"]
+            if args.lost_grace is not None:
+                cmd += ["--lost-grace", str(args.lost_grace)]
             if args.skip_existing:
                 cmd += ["--skip-existing"]
             fh = open(log_dir / f"fold{k}.log", "a", encoding="utf-8")
@@ -2007,7 +2035,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="회전 폴백으로 찾은 프레임을 미검출로 재생 (폴백 켜고 추출한 클립으로 폴백 없는 결과 재현)")
     ap.add_argument("--kp-dir", default=None,
                     help="키포인트 클립 폴더 (기본 dataset/_keypoints/v1). 다른 추출본으로 같은 실험을 돌릴 때는 --out도 따로 둘 것")
+    ap.add_argument("--lost-grace", type=float, default=None,
+                    help="모든 재생(평가, 학습 창, 검증)의 짧은 미검출 유예 lost_grace_s (R1, 기본 0.0 고정. "
+                         "R 단계 변형은 자체 값 0.5를 씀)")
     args = ap.parse_args(argv)
+    if args.lost_grace is not None and args.lost_grace < 0:
+        raise SystemExit("--lost-grace는 0 이상이어야 합니다")
 
     out_dir = Path(args.out)
     if not out_dir.is_absolute():
@@ -2017,13 +2050,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.fa_ref not in VARIANTS:
         raise SystemExit(f"--fa-ref: 알 수 없는 변형 {args.fa_ref!r}")
     meta = {"stages": args.stages_list, "folds": fold_list, "seeds": args.seeds, "f_margin": args.f_margin,
-            "epochs_override": args.epochs, "fa_ref": args.fa_ref}
+            "epochs_override": args.epochs, "fa_ref": args.fa_ref,
+            "frontend": {"kp_dir": args.kp_dir, "switch_policy": args.switch_policy,
+                         "use_fallback": not args.no_fallback,
+                         "lost_grace_s": 0.0 if args.lost_grace is None else float(args.lost_grace)}}
 
     if args.summarize_only:
         # 요약만 다시 만들 때는 실행 설정(단계, seed, epoch)이 이번 명령의 기본값일 뿐이라 기록하지 않음
         summarize_out(out_dir, {"fa_ref": args.fa_ref}, fa_ref=args.fa_ref)
         _log(f"summary written to {out_dir}")
         return 0
+    from training.experiments import replay as _R0
+    # 알람 뒤 래치: 러너 플래그 없음, study_params 고정값 (fold 하위 프로세스도 같은 값)
+    meta["frontend"]["post_alarm_latch"] = bool(_R0.study_params("off").post_alarm_latch)
 
     # 엔진 INFO 로그(AI VERIFY 등)는 수만 줄이라 끔
     logging.basicConfig(level=logging.WARNING)
@@ -2059,6 +2098,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         from training.experiments import replay as _R
         _R.SWITCH_POLICY = args.switch_policy
         _R.USE_FALLBACK = not args.no_fallback
+        if args.lost_grace is not None:
+            _R.STUDY_OVERRIDES["lost_grace_s"] = float(args.lost_grace)
         clips = W.load_clips(rows, kp_dir=args.kp_dir)
         _log(f"loaded {len(clips)} clips in {time.time() - t0:.1f}s, device {device}")
         failed = 0

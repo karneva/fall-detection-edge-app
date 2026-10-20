@@ -32,6 +32,7 @@ BASE_PARAMS = dict(
     ai_suppress_pfall_th=0.4,
     ai_escalate_s=60.0,
     ai_escalate_requires_drop=True,
+    lost_grace_s=0.0,
 )
 
 
@@ -190,6 +191,26 @@ class ClipToObsTest(unittest.TestCase):
         self.assertEqual((p.ai_mode, p.sustain_s, p.abnormal_timeout_s, p.ai_suppress_pfall_th,
                           p.ai_escalate_s, p.ai_escalate_requires_drop), ("veto", 8.0, 10.0, 0.4, 60.0, True))
         self.assertEqual(replay.study_params().ai_mode, "off")
+
+    def test_study_params_pins_lost_grace_and_overrides(self):
+        # 운영 기본값과 무관하게 0.0 고정 (이전 단계 재현), STUDY_OVERRIDES < 직접 준 값
+        self.assertEqual(replay.study_params("veto").lost_grace_s, 0.0)
+        saved = dict(replay.STUDY_OVERRIDES)
+        try:
+            replay.STUDY_OVERRIDES["lost_grace_s"] = 0.5
+            self.assertEqual(replay.study_params("off").lost_grace_s, 0.5)
+            self.assertEqual(replay.study_params("veto", ai_suppress_pfall_th=0.3).lost_grace_s, 0.5)
+            self.assertEqual(replay.study_params("off", lost_grace_s=0.25).lost_grace_s, 0.25)
+            self.assertEqual(replay.study_params("off").abnormal_timeout_s, 10.0)
+        finally:
+            replay.STUDY_OVERRIDES.clear()
+            replay.STUDY_OVERRIDES.update(saved)
+        self.assertEqual(replay.study_params().lost_grace_s, 0.0)
+
+    def test_study_params_pins_post_alarm_latch_off(self):
+        # 래치(운영 기본 켬)는 실험 재생에서 끔 (progression_v1, p7b_*, p8_full 재현), 직접 주면 켤 수 있음
+        self.assertFalse(replay.study_params("veto").post_alarm_latch)
+        self.assertTrue(replay.study_params("off", post_alarm_latch=True).post_alarm_latch)
 
     def test_ema_reset_per_clip(self):
         clip_a, _ = _synth_clip("fast_fall", lie_s=2.0, seed=1)
