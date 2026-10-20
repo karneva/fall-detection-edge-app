@@ -9,8 +9,10 @@
 
 모드:
   rules_only   AI 미사용 (AI_MODE=off)
-  rules_ai     1D CNN veto (가중치 필요, 없으면 fail-open이라 rules_only와 같아짐)
-  shadow       1D CNN 판정만 기록, 억제 안 함 (p_fall 분포 수집용)
+  rules_ai     분류기 veto (가중치 필요, 없으면 fail-open이라 rules_only와 같아짐)
+  shadow       분류기 판정만 기록, 억제 안 함 (p_fall 분포 수집용)
+  분류기는 운영 기본 검증기 그대로: 가중치 메타가 v2면 사건 구간 4초 창들의 최대 p_fall (E*max),
+  v1(또는 메타 없음)이면 최근 30프레임. --weights로 가중치를 고를 수 있음 (기본: 운영과 같은 탐색 순서)
   const_fall   항상 p_fall=0.9를 내는 가짜 AI
   const_adl    항상 p_fall=0.05를 내는 가짜 AI (AI가 전부 틀릴 때의 최악 recall 확인용)
 
@@ -184,8 +186,18 @@ def _parse_param_overrides(pairs: Iterable[str]) -> Dict[str, Any]:
     return out
 
 
+def _load_weights(path: str) -> Dict[str, Any]:
+    """분류기 싱글턴을 path 가중치로 다시 만듭니다 (--weights). 상태를 반환하고 예외를 던지지 않습니다."""
+    try:
+        from app.ai_classifier.inference import load_classifier
+
+        return load_classifier(path).status()
+    except Exception as e:
+        return {"enabled": False, "load_error": f"import failed: {e!r}"}
+
+
 def _classifier_status() -> Dict[str, Any]:
-    """1D CNN 분류기 상태. numpy/torch가 없어도 예외 없이 disabled로 보고합니다."""
+    """분류기 상태 (version v1/v2 포함). numpy/torch가 없어도 예외 없이 disabled로 보고합니다."""
     try:
         from app.ai_classifier.inference import get_classifier
 
@@ -246,6 +258,7 @@ def _ai_records(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "reason": e.get("reason"),
                 "decision": ai.get("decision"),
                 "p_fall": ai.get("p_fall"),
+                "model_id": ai.get("model_id"),
                 "window_offset_from_abnormal_s": ai.get("window_offset_from_abnormal_s"),
             })
     return out
@@ -326,7 +339,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="omit per-file records (compare_results then cannot check per-file regressions)")
     ap.add_argument("--allow-disabled-ai", action="store_true",
                     help="run rules_ai/shadow even if the classifier failed to load")
+    ap.add_argument("--weights", default=None,
+                    help="classifier weights for rules_ai/shadow (v1 .pth or v2 .pt with .meta.json); "
+                         "default: same lookup as runtime (AI_MODEL_PATH, weights/, dataset/_models/)")
     args = ap.parse_args(argv)
+    if args.weights:
+        st = _load_weights(args.weights)
+        print(f"[INFO] classifier version={st.get('version')} enabled={st.get('enabled')} "
+              f"load_error={st.get('load_error')}", file=sys.stderr)
 
     if args.synthetic:
         items = synthetic_files()
@@ -359,6 +379,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "dataset": dataset,
         "scoring": {"pre_tol_s": args.pre_tol_s, "max_latency_s": args.max_latency_s},
         "param_overrides": overrides,
+        "weights": args.weights,
         "modes": results,
     }
     out = Path(args.out) if args.out else REPO_ROOT / "runs" / "eval" / f"{name}_{sha or 'nogit'}.json"

@@ -4,7 +4,9 @@ AI 분류기 가중치 경로 해석 (표준 라이브러리만 사용)
 탐색 순서:
 1. 명시 경로(explicit) - 주어지면 그 경로만 시도하고 다른 후보로 넘어가지 않음
 2. 환경변수 AI_MODEL_PATH - 위와 동일하게 그 경로만 시도
-3. 패키지 기준 weights/ 아래 기본 파일명 (active_best -> best 순)
+3. 배포 v2 가중치 (fall_cnn_gap_v2.pt, 옆에 .meta.json이 있을 때만): 패키지 weights/ -> dataset/_models/
+   (training/train_v2.py 기본 저장 위치) 순
+4. 패키지 기준 weights/ 아래 v1 기본 파일명 (active_best -> best 순)
 
 상대경로는 현재 작업 디렉터리, 저장소 루트 순으로 찾습니다.
 """
@@ -19,6 +21,10 @@ REPO_ROOT = PKG_DIR.parents[1]
 DEFAULT_WEIGHTS_DIR = PKG_DIR / "weights"
 
 DEFAULT_WEIGHT_NAMES = ("fall_model_active_best.pth", "fall_model_best.pth")
+# 배포 v2 (사건 구간 E1, Day 8 결정 3): 메타가 함께 있을 때만 기본값으로 씀
+V2_WEIGHT_NAME = "fall_cnn_gap_v2.pt"
+V2_EXTRA_DIRS = (REPO_ROOT / "dataset" / "_models",)
+_META_SUFFIX = ".meta.json"  # model_meta.META_SUFFIX와 같음 (순환 import 방지)
 
 
 def _resolve_one(path_str: str) -> Optional[str]:
@@ -44,6 +50,12 @@ def resolve_weights_path(
         return _resolve_one(env_path)
 
     base = Path(search_dir) if search_dir is not None else DEFAULT_WEIGHTS_DIR
+    # search_dir를 주면(테스트 등) 그 폴더만 봄
+    v2_dirs = (base,) if search_dir is not None else (base,) + tuple(V2_EXTRA_DIRS)
+    for d in v2_dirs:
+        c = Path(d) / V2_WEIGHT_NAME
+        if c.is_file() and c.with_name(c.name + _META_SUFFIX).is_file():
+            return str(c.resolve())
     for name in DEFAULT_WEIGHT_NAMES:
         c = base / name
         if c.is_file():

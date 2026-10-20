@@ -2,7 +2,8 @@
 진행 단계 비교 실험(progression study)용 분류 모델 모음 (torch 필요)
 
 - Fall1DCNN    : 운영(app/ai_classifier/model.py) 모델을 그대로 재사용 (단계 B/C/D, 입력 (N,34,30) 고정 길이)
-- Fall1DCNNGAP : Fall1DCNN의 conv 몸통 + 전역 평균 풀링(GAP) 헤드 (단계 E1, 입력 길이 무관)
+- Fall1DCNNGAP : Fall1DCNN의 conv 몸통 + 전역 평균 풀링(GAP) 헤드 (단계 E1, 입력 길이 무관).
+                 배포 모델이라 app/ai_classifier/model.py에 정의하고 여기서는 다시 내보냄 (저장된 E1_s*.pt 그대로 로드)
 - FallTCN      : 1x1 stem -> 팽창(dilation 1/2/4/8) 잔차 블록 4개 -> 어텐션 풀링 -> 2-way 선형 (단계 E2)
                  92채널 입력, width=40에서 약 43k 파라미터
 
@@ -13,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from app.ai_classifier.model import Fall1DCNN
+from app.ai_classifier.model import Fall1DCNN, Fall1DCNNGAP
 
 __all__ = ["Fall1DCNN", "Fall1DCNNGAP", "FallTCN", "count_params", "build_model"]
 
@@ -21,37 +22,6 @@ __all__ = ["Fall1DCNN", "Fall1DCNNGAP", "FallTCN", "count_params", "build_model"
 def count_params(model: nn.Module, trainable_only: bool = True) -> int:
     """학습 가능한(기본) 파라미터 수. BatchNorm running 통계 같은 buffer는 세지 않습니다."""
     return int(sum(p.numel() for p in model.parameters() if p.requires_grad or not trainable_only))
-
-
-class Fall1DCNNGAP(nn.Module):
-    """
-    Fall1DCNN과 같은 conv 몸통(conv1 64 -> conv2 128 -> maxpool 2 -> conv3 128, 각 BN+ReLU)에
-    flatten 대신 시간축 전역 평균 풀링을 붙인 모델. 창 길이(T)에 의존하지 않습니다.
-    """
-
-    def __init__(self, in_ch: int, n_cls: int = 2, dropout: float = 0.5):
-        super().__init__()
-        self.conv1 = nn.Conv1d(in_ch, 64, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm1d(64)
-        self.conv2 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm1d(128)
-        self.conv3 = nn.Conv1d(128, 128, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm1d(128)
-        self.pool = nn.MaxPool1d(2)
-        self.dropout = nn.Dropout(dropout)
-        self.fc1 = nn.Linear(128, 64)
-        self.fc2 = nn.Linear(64, n_cls)
-
-    def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = F.relu(self.bn2(self.conv2(x)))
-        if x.size(-1) >= 2:  # 길이 1 창도 통과하도록 (풀링 생략)
-            x = self.pool(x)
-        x = F.relu(self.bn3(self.conv3(x)))
-        x = x.mean(dim=-1)  # GAP: (N,128)
-        x = self.dropout(x)
-        x = F.relu(self.fc1(x))
-        return self.fc2(x)
 
 
 class _TCNBlock(nn.Module):
