@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any, List, Tuple, Callable
 from .kp_buffer import TimedKeypointBuffer, frame_wh_from_track, kps_to_frame, window_summary
 from .presence import PresenceEngine, PresenceParams  # 기존 import 경로(app.core.level1) 호환
 from ..config import (
-    ABNORMAL_TIMEOUT_S,
+    ABNORMAL_TIMEOUT_S, LOST_GRACE_S, POST_ALARM_LATCH,
     AI_MODE, AI_SUPPRESS_PFALL_TH, AI_ESCALATE_S, AI_ESCALATE_REQUIRES_DROP,
 )
 
@@ -106,8 +106,8 @@ class Level1Params:
 
     # 짧은 미검출 유예 (초). 사람이 이 시간보다 짧게 끊겨 검출되지 않으면 워밍업 카운터와 진입 신호 누적값을
     # 유지하고, ABNORMAL이면 시간 기준 판정(타임아웃)을 이어감. 0이면 기존 동작 (한 프레임만 놓쳐도 초기화).
-    # 이보다 긴 미검출(화면 밖 등)은 기존과 같음.
-    lost_grace_s: float = 0.0
+    # 이보다 긴 미검출(화면 밖 등)은 기존과 같음. 기본값은 환경변수 LOST_GRACE_S (운영 0.5, 오프라인 재생은 0.0 고정)
+    lost_grace_s: float = LOST_GRACE_S
 
     # 부분 신체 판단용 마진
     partial_edge_margin: float = 0.06
@@ -117,6 +117,14 @@ class Level1Params:
     # 이벤트 유지 및 쿨다운
     level1_hold_s: float = 1.0
     level1_cooldown_s: float = 25.0
+    # LEVEL1 알람 뒤 사람이 일어날 때까지(넘어지기 전 자세 기준) 다시 ABNORMAL에 들어가지 않음.
+    # 일어선 자세가 post_alarm_min_upright_s 이상(감쇠 누적) 보이면 '일어섬'으로 보고 진입을 다시 허용
+    # (다시 넘어짐은 빠르든 느리든, 저자세 지속 경로 포함 정상 판정). 한 프레임짜리 bbox 흔들림은 누적되지 않음.
+    # 끄면 기존 동작 (리셋 뒤 누운 자세가 새 기준이 되어 진입/회복이 몇 초마다 반복, 알림은 나가지 않음).
+    # 기본값은 환경변수 POST_ALARM_LATCH (운영 꺼짐): 일어선 자세로만 풀리고 만료가 없어, 앉았다/가려진 채 서 있다
+    # 다시 넘어지거나 다른 사람이 들어와 넘어지면 두 번째 알람을 놓칠 수 있음 (docs/TUNING_GUIDE.md 'LEVEL1 뒤 래치')
+    post_alarm_latch: bool = POST_ALARM_LATCH
+    post_alarm_min_upright_s: float = 0.4
 
     # 오탐 줄이는 핵심: 단발 신호가 아니라 "짧은 지속" 요구
     enter_confirm_s: float = 0.35          # 0.3~0.5초 권장
@@ -156,17 +164,75 @@ class Level1Params:
 
 
 class _ClassifierVerifier:
-    """기본 검증기: 1D CNN 분류기(싱글턴)를 지연 로드해서 사용합니다."""
+    """
+    기본 검증기: 분류기(싱글턴, 가중치 메타로 v1/v2 결정)를 지연 로드해서 사용합니다.
+
+    - v1 (legacy): 엔진이 넘겨주는 최근 30프레임 seq -> predict_proba(seq)
+    - v2 (배포): bind_engine(engine)으로 받은 엔진의 원시 키포인트 버퍼에서 ABNORMAL 진입 사건 구간부터
+      판정 시점까지 4초 창들의 최대 p_fall (classifier.make_engine_verifier, 오프라인 E*max와 같은 구현).
+      엔진이 묶이지 않았으면 None (fail-open). Level1Engine은 생성 시 bind_engine을 호출합니다.
+    classifier: 테스트용 주입 (None이면 inference.get_classifier()).
+    """
+
+    def __init__(self, classifier: Any = None):
+        self._classifier = classifier
+        self._engine: Any = None
+        self._sliding: Any = None
+        self._sliding_for: Any = None
+
+    def bind_engine(self, engine: Any) -> None:
+        self._engine = engine
+        self._sliding = None
+        self._sliding_for = None
+
+    def _get(self) -> Any:
+        if self._classifier is not None:
+            return self._classifier
+        from ..ai_classifier.inference import get_classifier
+        return get_classifier()
 
     def __call__(self, seq: List[List[float]]) -> Optional[float]:
-        from ..ai_classifier.inference import get_classifier
-        return get_classifier().predict_proba(seq)
+        clf = self._get()
+        if not (getattr(clf, "enabled", False) and getattr(clf, "feature_version", None) == "v2"):
+            return clf.predict_proba(seq)
+        if self._engine is None:
+            logger.warning("[AI] v2 classifier needs bind_engine(engine); returning None (fail-open)")
+            return None
+        if self._sliding is None or self._sliding_for is not clf:
+            self._sliding = clf.make_engine_verifier()
+            self._sliding_for = clf
+            if self._sliding is None:
+                return None
+            self._sliding.bind_engine(self._engine)
+        return self._sliding(seq)
+
+    @property
+    def last_window_starts(self) -> Optional[List[float]]:
+        """v2: 마지막 판정에서 점수를 낸 창들의 시작 시각 (첫 값 = 사건 구간 시작). v1/미판정이면 None."""
+        return getattr(self._sliding, "last_starts", None) if self._sliding is not None else None
+
+    @property
+    def last_window_ps(self) -> Optional[List[float]]:
+        """v2: 마지막 판정의 창별 p_fall (last_window_starts와 같은 순서). v1/미판정이면 None."""
+        return getattr(self._sliding, "last_ps", None) if self._sliding is not None else None
+
+    @property
+    def last_window_s(self) -> Optional[float]:
+        """v2: 창 길이 (초, 메타의 window_s). v1/미판정이면 None."""
+        return getattr(self._sliding, "win_s", None) if self._sliding is not None else None
+
+    @property
+    def version(self) -> Optional[str]:
+        try:
+            clf = self._get()
+            return getattr(clf, "feature_version", None) if getattr(clf, "enabled", False) else None
+        except Exception:
+            return None
 
     @property
     def model_id(self) -> Optional[str]:
         try:
-            from ..ai_classifier.inference import get_classifier
-            return get_classifier().weights_hash
+            return self._get().weights_hash
         except Exception:
             return None
 
@@ -254,6 +320,22 @@ class Level1Engine:
         self.switch_grace_until_ts: float = 0.0
         self.switch_grace_duration: float = 1.0 # 1초간 판단 유예
 
+        # 알람 뒤 래치 (post_alarm_latch): LEVEL1 뒤 사람이 일어날 때까지 켜짐. base는 알람을 낸 사건의 넘어지기 전
+        # 자세 기준값(없으면 None). reset_all로 지우지 않고 일어남 확인, 회복 종료, 대상 전환, 다음 알람에서만 바뀜.
+        # stood: 알람 뒤 일어선 자세가 post_alarm_min_upright_s 이상 보임 -> 진입 차단을 풂 (기준값은 유지)
+        self.post_alarm_active: bool = False
+        self.post_alarm_base: Optional[float] = None
+        self.post_alarm_upright_acc_s: float = 0.0
+        self.post_alarm_stood: bool = False
+
+        # 엔진 상태를 읽는 검증기(사건 구간 기반 등)는 엔진을 받아 둠 (오류가 나도 엔진은 만들어짐, 판정 시 fail-open)
+        bind = getattr(self._verifier, "bind_engine", None)
+        if callable(bind):
+            try:
+                bind(self)
+            except Exception:
+                logger.exception("[AI ERROR] verifier.bind_engine raised")
+
     def reset_all(self):
         """엔진의 모든 내부 상태를 초기화합니다."""
         self.state = "NORMAL"
@@ -301,6 +383,7 @@ class Level1Engine:
         self.kp_ts.clear()
         self.kp_buffer.clear()
         self.switch_grace_until_ts = 0.0
+        # 알람 뒤 래치(post_alarm_*)는 유지 (LEVEL1 유지 시간 뒤의 리셋을 넘어 살아 있어야 함)
 
     def _reset_incident_ai(self):
         """사건 단위 AI 억제/승격 상태를 초기화합니다."""
@@ -470,6 +553,7 @@ class Level1Engine:
         if obs.get("target_switched", False):
             logger.info(f"[SWITCH DETECTED] Frame {frame_index}. Resetting signals and starting grace period.")
             self.reset_all()
+            self._clear_post_alarm()
             self.switch_grace_until_ts = ts + self.switch_grace_duration
             return None
 
@@ -564,10 +648,13 @@ class Level1Engine:
 
         # 1. 정상(NORMAL) 상태에서의 로직
         if self.state == "NORMAL":
+            self._update_post_alarm(ts, aspect, dt)
             if self.present_streak < self.p.warmup_frames:
                 return None
 
-            if not is_partial and aspect < self.p.force_abnormal_aspect_th:
+            # 알람 뒤 아직 일어나지 않았으면 진입 차단 (저자세 누적도 하지 않음)
+            entry_blocked = self.post_alarm_active and not self.post_alarm_stood
+            if not is_partial and aspect < self.p.force_abnormal_aspect_th and not entry_blocked:
                 if self.low_posture_cnt == 0:
                     self.low_posture_start_ts = ts
                 self.low_posture_cnt += 1
@@ -633,6 +720,11 @@ class Level1Engine:
                     trigger = True
                     trigger_reason = f"confirm_enter hits={signal_hits} acc={self.enter_acc_s:.2f}"
 
+            if trigger and entry_blocked:
+                # 알람 뒤 계속 바닥에 있음 (움직여서 신호가 나도 같은 사건): 재진입하지 않음
+                trigger = False
+                self.enter_acc_s = 0.0
+
             if trigger:
                 self.state = "ABNORMAL"
                 self.abnormal_start_ts = ts
@@ -642,6 +734,9 @@ class Level1Engine:
                 self.low_posture_cnt = 0
 
                 self.baseline_at_enter = baseline
+                if self.post_alarm_base is not None and (baseline is None or baseline < self.post_alarm_base):
+                    # 알람 뒤 누운 채 재진입: 누운 자세가 기준이 되면 곧바로 '회복'으로 오판하므로 넘어지기 전 기준을 씀
+                    self.baseline_at_enter = self.post_alarm_base
                 self.abnormal_stats = {}
                 self.abnormal_confirmed = False
                 self._reset_incident_ai()
@@ -834,6 +929,7 @@ class Level1Engine:
                 self.shoulder_acc_s = 0.0
                 self.abnormal_confirmed = False
                 self._reset_incident_ai()
+                self._clear_post_alarm()
 
                 return {
                     "type": "abnormal_exit",
@@ -887,7 +983,11 @@ class Level1Engine:
         현재 사건의 분석용 스냅샷 (sidecar 저장용).
         - event_window: ABNORMAL 진입 기준 원시 키포인트 구간 (낙상 동작 포함, 학습/분석용)
           저자세 지속으로 진입했다면 저자세가 시작된 시각부터 (enter_reason으로 구분)
-        - ai_input: AI가 판정할 때 실제로 본 30프레임과 시각 (승격 이벤트에서도 억제 당시 입력)
+        - ai_input: AI가 판정할 때 실제로 본 입력 (승격 이벤트에서도 억제 당시 입력). kind로 구분:
+          "v1_seq30": 검증기에 넘긴 최근 30프레임 {ts, kps(평탄화 34값)}. v1 모델 입력
+            (v2 검증기가 점수 낸 창이 없어 fail-open한 판정도 이 기록)
+          "v2_event_windows": v2가 점수를 낸 창들 {window_starts, window_s, ps} + 첫 창 시작부터 판정 시점까지
+            원시 kp_buffer 구간 (kp_buffer.window 형식: ts/kps/bbox, pad_s 포함)
         """
         if self.event_window is None:
             self._capture_event_window()
@@ -947,6 +1047,41 @@ class Level1Engine:
         self.state = "LEVEL1"
         self.level1_ts = ts
         self.cooldown_until_ts = ts + self.p.level1_cooldown_s
+        if self.p.post_alarm_latch:
+            self.post_alarm_active = True
+            self.post_alarm_base = self.baseline_at_enter
+            self.post_alarm_upright_acc_s = 0.0
+            self.post_alarm_stood = False
+
+    def _clear_post_alarm(self):
+        self.post_alarm_active = False
+        self.post_alarm_base = None
+        self.post_alarm_upright_acc_s = 0.0
+        self.post_alarm_stood = False
+
+    def _update_post_alarm(self, ts: float, aspect: float, dt: float):
+        """
+        알람 뒤 래치 갱신 (NORMAL에서 매 관측 프레임). 일어선 자세 = 넘어지기 전 기준 x 회복 비율 초과이면서
+        누운 자세 기준(aspect_abs_th) 초과. 누적(아니면 1.5배 감쇠)이 post_alarm_min_upright_s에 닿으면 stood
+        (진입 차단 해제, 다음 알람/해제까지 유지), recover_s에 닿으면 래치 해제.
+        미검출 뒤 첫 프레임의 긴 dt 한 번으로 일어섬이 되지 않도록 프레임당 누적은 0.25초로 제한.
+        """
+        if not self.post_alarm_active:
+            return
+        th = self.p.aspect_abs_th
+        if self.post_alarm_base is not None:
+            th = max(th, self.post_alarm_base * min(self.p.aspect_recover_ratio, 0.80))
+        step_s = min(dt, 0.25)
+        if aspect > th:
+            self.post_alarm_upright_acc_s += step_s
+        else:
+            self.post_alarm_upright_acc_s = max(0.0, self.post_alarm_upright_acc_s - step_s * 1.5)
+        if not self.post_alarm_stood and self.post_alarm_upright_acc_s >= self.p.post_alarm_min_upright_s:
+            logger.info("[POST-ALARM] person stood up after alarm. re-entry allowed")
+            self.post_alarm_stood = True
+        if self.post_alarm_upright_acc_s >= self.p.recover_s:
+            logger.info("[POST-ALARM] person upright again. latch cleared")
+            self._clear_post_alarm()
 
     def _enter_suppressed_watch(self, ts: float, frame_index: int, logic: str, ai: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1051,7 +1186,8 @@ class Level1Engine:
             logger.info("[AI UNAVAILABLE] not enough frames. Defaulting to rule-base.")
             return ai
 
-        self.ai_input_last = {"ts": list(self.kp_ts), "kps": [list(f) for f in self.kp_seq]}
+        # v1 기록 (v2가 창 점수를 내면 판정 뒤 _record_v2_input이 실제 입력으로 바꿈)
+        self.ai_input_last = {"kind": "v1_seq30", "ts": list(self.kp_ts), "kps": [list(f) for f in self.kp_seq]}
         t0 = time.perf_counter()
         try:
             p_fall = self._verifier(list(self.kp_seq))
@@ -1065,6 +1201,17 @@ class Level1Engine:
                 ai["model_id"] = getattr(self._verifier, "model_id", None)
             except Exception:
                 ai["model_id"] = None
+            # v2(사건 구간 창): 실제 창 시작은 30프레임 버퍼가 아니라 검증기가 점수를 낸 창들 (첫 값 = 사건 구간 시작)
+            try:
+                starts = getattr(self._verifier, "last_window_starts", None)
+            except Exception:
+                starts = None
+            if starts:
+                ai["window_start_ts"] = float(starts[0])
+                ai["n_windows"] = len(starts)
+                ai["window_offset_from_abnormal_s"] = (
+                    float(starts[0]) - self.abnormal_start_ts if self.abnormal_start_ts is not None else None)
+                self._record_v2_input(ai, starts, ts)
 
         if p_fall is None:
             # AI가 판단 불가 -> 안전을 위해 룰베이스 결과인 '낙상'을 그대로 인정
@@ -1085,9 +1232,31 @@ class Level1Engine:
 
         ai["p_fall"] = p_fall
         ai["conf"] = max(p_fall, 1.0 - p_fall)
-        # p_fall <= 0.4 는 기존 'ADL 판정 & conf >= 0.6' 조건과 동치
-        ai["decision"] = "adl" if p_fall <= th else "fall"
-        ai["suppress"] = (ai["decision"] == "adl" and mode == "veto")
+        # 억제는 p_fall < th (엄격). th <= 0이면 억제하지 않음 (veto 끄기)
+        ai["decision"] = "adl" if p_fall < th else "fall"
+        ai["suppress"] = (ai["decision"] == "adl" and mode == "veto" and th > 0)
 
         logger.info(f"[AI VERIFY] mode={mode} decision={ai['decision']} p_fall={p_fall:.2f}")
         return ai
+
+    def _record_v2_input(self, ai: Dict[str, Any], starts: List[float], ts: float) -> None:
+        """
+        v2 판정 기록: ai에 창별 시작/점수/최대 창을, ai_input_last에 실제로 점수를 낸 입력(첫 창 시작 ~ 판정 시점의
+        원시 kp_buffer 구간)을 남깁니다. 검증기의 last_window_ps/last_window_s는 없어도 됨. 예외를 던지지 않음.
+        """
+        try:
+            ws = [float(s) for s in starts]
+            ps = getattr(self._verifier, "last_window_ps", None)
+            ps = [float(p) for p in ps] if ps is not None and len(ps) == len(ws) else None
+            win_s = getattr(self._verifier, "last_window_s", None)
+            win_s = float(win_s) if win_s is not None else None
+            ai["window_starts"] = ws
+            ai["window_ps"] = ps
+            ai["argmax_window_start_ts"] = ws[max(range(len(ps)), key=ps.__getitem__)] if ps else None
+            t_end = float(self.kp_ts[-1]) if self.kp_ts else float(ts)
+            self.ai_input_last = {
+                "kind": "v2_event_windows", "window_starts": ws, "window_s": win_s, "ps": ps,
+                **self.kp_buffer.window(ws[0], t_end, pad_s=self.p.event_window_pad_s),
+            }
+        except Exception:
+            logger.exception("[AI] failed to record v2 input")

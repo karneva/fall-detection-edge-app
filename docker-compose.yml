@@ -23,6 +23,10 @@ services:
       - DEFAULT_CONF=${DEFAULT_CONF:-0.50}
       - DETERMINISTIC=${DETERMINISTIC:-1}
       - USE_HALF=${USE_HALF:-0}
+      - ROTATE_FALLBACK=${ROTATE_FALLBACK:-1}
+      - LOST_GRACE_S=${LOST_GRACE_S:-0.5}
+      - TARGET_SWITCH_POLICY=${TARGET_SWITCH_POLICY:-multi}
+      - POST_ALARM_LATCH=${POST_ALARM_LATCH:-0}
       - DEVICE_ID=${DEVICE_ID:-JETSON-EDGE-001}
       - LOCATION_ID=${LOCATION_ID:-default-location}
       - SERVER_URL=${SERVER_URL:-https://your-backend.example.com}

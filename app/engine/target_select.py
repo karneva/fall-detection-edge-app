@@ -10,7 +10,12 @@
 - 이전 대상 박스가 없으면 신뢰도 최고 후보 (교체 아님)
 - 이전 박스와 IoU가 가장 큰 후보의 IoU가 iou_thresh 이상이면 그 후보를 유지
 - 아니면 신뢰도 최고 후보로 교체 (switched=True)
+  단 policy="multi"이고 후보가 1명뿐이면 같은 사람으로 봄 (switched=False, 로드맵 R2)
 - 동점이면 앞쪽 인덱스 (torch.argmax와 같음)
+
+정책(policy)은 고르는 인덱스는 바꾸지 않고 '교체' 표시만 바꿉니다. 기본값은 "all"(기존 규칙)이고 런타임은
+app.config.TARGET_SWITCH_POLICY를 넘깁니다. 학습용 추출기는 "all"로 기록하고(클립의 switched), 오프라인 재생이
+n_cand로 정책을 적용합니다 (training/experiments/replay.effective_switched와 같은 결과).
 
 박스/신뢰도 원소는 float 리스트나 numpy 배열 행 모두 받습니다. 런타임은 numpy(float32) 값을 그대로
 넘겨 기존 계산과 비트 단위로 같은 결과를 냅니다.
@@ -51,6 +56,7 @@ def select_target_index(
     confs: Sequence,
     last_bbox=None,
     iou_thresh: float = 0.3,
+    policy: str = "all",
 ) -> Tuple[Optional[int], bool]:
     """
     이전 프레임의 대상 위치를 고려해 추적할 후보의 인덱스를 고릅니다.
@@ -60,10 +66,13 @@ def select_target_index(
         confs: 후보별 박스 신뢰도
         last_bbox: 이전 프레임에서 선택한 박스 (없으면 None)
         iou_thresh: 같은 대상으로 볼 최소 IoU
+        policy: "all" = IoU가 낮으면 항상 교체 (기존), "multi" = 후보가 2명 이상일 때만 교체로 봄
 
     Returns:
         (선택 인덱스 또는 None, 대상 교체 여부)
     """
+    if policy not in ("all", "multi"):
+        raise ValueError(f"policy must be 'all' or 'multi': {policy!r}")
     if boxes_xyxy is None or len(boxes_xyxy) == 0:
         return None, False
 
@@ -82,4 +91,7 @@ def select_target_index(
     # 2. 교체 결정 (IoU가 낮으면 신뢰도 최고 후보로 스위칭)
     if match_idx != -1 and best_iou >= iou_thresh:
         return match_idx, False
+    # 3. 후보가 1명뿐이면 다른 사람이 나타났다고 볼 근거가 없음 (자세가 크게 바뀐 같은 사람, multi 정책)
+    if policy == "multi" and len(boxes_xyxy) == 1:
+        return 0, False
     return _argmax_first(confs), True

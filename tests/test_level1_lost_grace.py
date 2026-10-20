@@ -1,17 +1,20 @@
 """
 짧은 미검출 유예(Level1Params.lost_grace_s) 테스트. 표준 라이브러리만 사용 (합성 시나리오).
 
-- 기본값 0: 한 프레임만 놓쳐도 워밍업 카운터가 0 (기존 동작, golden trace와 같음)
-- 유예 0.5초: 짧은 끊김에는 카운터와 누적값 유지, 긴 끊김은 기존처럼 초기화
+- 유예 0 (Day 7 이전 동작, 오프라인 재생 고정값): 한 프레임만 놓쳐도 워밍업 카운터가 0
+- 유예 0.5초 (운영 기본값, 환경변수 LOST_GRACE_S): 짧은 끊김에는 카운터와 누적값 유지, 긴 끊김은 기존처럼 초기화
 - ABNORMAL 중 짧은 끊김에도 타임아웃 판정이 이어짐, 긴 끊김에서는 기존처럼 멈춤
 """
 import copy
 import unittest
 
+from app import config
 from app.core.level1 import Level1Engine, Level1Params
 from app.eval.synth import CountingVerifier, make_scenario
 
-BASE = dict(sustain_s=10.0, abnormal_timeout_s=10.0, ai_mode="off", ai_suppress_pfall_th=0.4, ai_escalate_s=60.0)
+# 이 파일의 '기본'은 유예 0 (환경변수 LOST_GRACE_S에 영향받지 않도록 고정)
+BASE = dict(sustain_s=10.0, abnormal_timeout_s=10.0, ai_mode="off", ai_suppress_pfall_th=0.4, ai_escalate_s=60.0,
+            lost_grace_s=0.0)
 
 
 def _lost(o):
@@ -36,6 +39,9 @@ def _run(obs, **kw):
 
 
 class LostGraceTest(unittest.TestCase):
+    def test_runtime_default_from_config(self):
+        self.assertEqual(Level1Params().lost_grace_s, config.LOST_GRACE_S)
+
     def setUp(self):
         self.obs, self.truth = make_scenario("fast_fall", lie_s=30.0)
         self.t0 = float(self.obs[0]["ts"])

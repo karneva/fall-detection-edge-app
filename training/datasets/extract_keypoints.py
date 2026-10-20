@@ -64,7 +64,8 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
 
     - 직전 프레임에서 고른 박스(픽셀)를 last_bbox로 넘겨 IoU 추적 (사람이 없으면 None으로 리셋, 런타임과 같음)
     - 좌표는 해당 프레임 크기로 정규화하고 [0, 1]로 자름 (obs_schema와 같음)
-    - switched (T,): 그 프레임에서 대상이 바뀌었는지 (런타임 obs.target_switched와 같음: 직전 프레임에 대상이 있었고
+    - switched (T,): 그 프레임에서 대상이 바뀌었는지 (정책 "all"의 런타임 obs.target_switched와 같음. 운영 기본 "multi"는
+      switched & (n_cand >= 2), 재생의 replay.effective_switched. 직전 프레임에 대상이 있었고
       IoU >= iou_thresh인 후보가 없어 최고 신뢰도 후보로 바꾼 경우만 True. 놓친 뒤 다시 잡은 첫 프레임은 False)
     - n_switch = switched.sum()
     - n_cand (T,): 프레임에서 검출된 사람 후보 수 (conf 이상). 대상 전환 정책(후보가 1명이면 전환으로 보지 않음) 비교용
@@ -105,10 +106,10 @@ def extract_frames(frames: Iterable[np.ndarray], fps: float, predictor: Predicto
             n_cand_l.append(int(len(boxes)))
             i_frame = len(ts) - 1
             # 폴백 없는 추적 (같은 검출, 비교용)
-            idx_b, sw_b = select_target_index(boxes, confs, last_bbox=last_bbox_base, iou_thresh=iou_thresh)
+            idx_b, sw_b = select_target_index(boxes, confs, last_bbox=last_bbox_base, iou_thresh=iou_thresh, policy="all")
             switched_base_l.append(bool(sw_b) and idx_b is not None)
             last_bbox_base = boxes[idx_b] if idx_b is not None else None
-            idx, switched = select_target_index(boxes, confs, last_bbox=last_bbox, iou_thresh=iou_thresh)
+            idx, switched = select_target_index(boxes, confs, last_bbox=last_bbox, iou_thresh=iou_thresh, policy="all")
             switched_l.append(bool(switched) and idx is not None)
             used_fb = False
             if idx is None and fallback and last_seen is not None and (i_frame - last_seen[1]) / fps <= recent_s:

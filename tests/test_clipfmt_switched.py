@@ -3,7 +3,8 @@
 
 - 저장/읽기, 검증, from_obs_records/from_sidecar 매핑
 - 추출기(extract_frames)의 프레임별 전환이 런타임(LivePipeline.step의 obs.target_switched)과 같은지
-  (torch가 있을 때 별도 프로세스에서 cv2/ultralytics를 스텁으로 바꿔 확인)
+  (torch가 있을 때 별도 프로세스에서 cv2/ultralytics를 스텁으로 바꿔 확인. 회전 폴백은 끄고, 추출기가 기록하는
+  "all" 정책은 그대로, 운영 기본 "multi" 정책은 switched & n_cand >= 2와 같은지)
 - 저장한 클립을 replay.clip_to_obs로 바꾸면 해당 프레임 obs에 target_switched가 실리는지
 numpy가 없으면 건너뜁니다.
 """
@@ -295,28 +296,38 @@ LIVE_SWITCH_PARITY_SCRIPT = textwrap.dedent(
         dets.append((boxes, confs, kxy, np.full((len(shown), 17), 0.8, np.float32)))
 
     frame = np.zeros((H, W, 3), np.uint8)
-    cap = mock.MagicMock()
-    cap.read.side_effect = [(True, frame)] * len(dets) + [(False, None)]
-    model = mock.MagicMock()
-    model.predict.side_effect = [[Results(d)] for d in dets]
-    pipe = live.LivePipeline(model, cap, jpeg_quality=80)
-    runtime_sw, runtime_present = [], []
-    while True:
-        obs, _, _ = pipe.step()
-        if obs is None:
-            break
-        runtime_sw.append(bool(obs["target_switched"]))
-        runtime_present.append(bool(obs["tracks"] and obs["tracks"][0].get("has_person")))
+
+    def run_live(policy):
+        cap = mock.MagicMock()
+        cap.read.side_effect = [(True, frame)] * len(dets) + [(False, None)]
+        model = mock.MagicMock()
+        model.predict.side_effect = [[Results(d)] for d in dets]
+        pipe = live.LivePipeline(model, cap, jpeg_quality=80)
+        pipe.rotate_fallback = False
+        pipe.switch_policy = policy
+        sw, present = [], []
+        while True:
+            obs, _, _ = pipe.step()
+            if obs is None:
+                break
+            sw.append(bool(obs["target_switched"]))
+            present.append(bool(obs["tracks"] and obs["tracks"][0].get("has_person")))
+        return sw, present
+
+    runtime_sw, runtime_present = run_live("all")
+    multi_sw, _ = run_live("multi")
 
     it = iter(dets)
     clip = ek.extract_frames((frame for _ in dets), 15.0, lambda fr: [next(it) for _ in fr], batch=4)
     ext_sw = clip["switched"].tolist()
+    ext_multi = [bool(a and n >= 2) for a, n in zip(ext_sw, clip["n_cand"].tolist())]
     print(json.dumps({"n": len(runtime_sw), "runtime_switches": sum(runtime_sw), "extractor_switches": sum(ext_sw),
                       "reacquire": sum(1 for a, b in zip(runtime_present, runtime_present[1:]) if b and not a),
                       "flag_mismatch": sum(a != b for a, b in zip(runtime_sw, ext_sw)),
-                      "present_mismatch": sum(a != b for a, b in zip(runtime_present, clip["present"].tolist()))}))
+                      "present_mismatch": sum(a != b for a, b in zip(runtime_present, clip["present"].tolist())),
+                      "multi_switches": sum(multi_sw), "multi_mismatch": sum(a != b for a, b in zip(multi_sw, ext_multi))}))
     ok = (len(runtime_sw) == len(ext_sw) == len(dets) and runtime_sw == ext_sw and sum(ext_sw) > 10
-          and runtime_present == clip["present"].tolist())
+          and runtime_present == clip["present"].tolist() and multi_sw == ext_multi and 0 < sum(multi_sw) < sum(ext_sw))
     sys.exit(0 if ok else 1)
     """
 )

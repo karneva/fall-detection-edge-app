@@ -6,7 +6,7 @@ from ultralytics import YOLO
 
 import numpy as np
 
-from ..config import FRAME_W, FRAME_H, DEFAULT_CONF, USE_HALF, ROTATE_FALLBACK
+from ..config import FRAME_W, FRAME_H, DEFAULT_CONF, USE_HALF, ROTATE_FALLBACK, TARGET_SWITCH_POLICY
 from ..core import build_observation
 from ..media.jpeg import encode_jpeg
 from .rotate_fallback import FALLBACK_RECENT_S, fallback_detect
@@ -57,10 +57,11 @@ def draw_skeleton_norm(frame, keypoints, conf_thr=0.3, edges=COCO17_EDGES,
         if a in pts and b in pts:
             cv2.line(frame, pts[a], pts[b], color, line_thickness)
 
-def select_best_person(results, last_bbox=None, iou_thresh=0.3):
+def select_best_person(results, last_bbox=None, iou_thresh=0.3, policy: Optional[str] = None):
     """
     이전 프레임의 위치 정보를 고려하여 추적할 최적의 대상을 선택합니다.
     선택 규칙은 target_select.select_target_index (학습용 추출기와 공유)를 따릅니다.
+    policy: 대상 전환 정책 ("all" | "multi", None이면 config.TARGET_SWITCH_POLICY)
     Returns: (results, is_switched)
     """
     if results.boxes is None or len(results.boxes) == 0:
@@ -69,7 +70,8 @@ def select_best_person(results, last_bbox=None, iou_thresh=0.3):
     # numpy(float32) 값을 그대로 넘겨 기존 torch 기반 계산과 같은 결과를 유지
     boxes = results.boxes.xyxy.cpu().numpy()
     confs = results.boxes.conf.cpu().numpy()
-    best_idx, is_switched = select_target_index(boxes, confs, last_bbox=last_bbox, iou_thresh=iou_thresh)
+    best_idx, is_switched = select_target_index(boxes, confs, last_bbox=last_bbox, iou_thresh=iou_thresh,
+                                                policy=policy or TARGET_SWITCH_POLICY)
 
     results.boxes = results.boxes[best_idx:best_idx + 1]
     if getattr(results, "keypoints", None) is not None and results.keypoints is not None:
@@ -115,6 +117,8 @@ class LivePipeline:
         
         # 객체 추적을 위한 이전 프레임 바운딩 박스 보관
         self.last_bbox = None
+        # 대상 전환 정책 (multi: 후보가 1명이면 전환으로 보지 않음, 엔진 리셋 방지)
+        self.switch_policy = TARGET_SWITCH_POLICY
         # 회전 폴백용: 마지막으로 대상을 본 위치(픽셀)와 시각
         self.rotate_fallback = ROTATE_FALLBACK
         self.last_seen_bbox = None
@@ -164,7 +168,7 @@ class LivePipeline:
         )
         
         # 단일 대상 추적 (IoU 기반 대상 고정)
-        r0, is_switched = select_best_person(results[0], last_bbox=self.last_bbox)
+        r0, is_switched = select_best_person(results[0], last_bbox=self.last_bbox, policy=self.switch_policy)
         ts = time.time()
 
         # 회전 폴백: 아무도 못 찾았고 직전에 대상을 봤으면 영상을 돌려 같은 자리의 사람을 다시 찾음

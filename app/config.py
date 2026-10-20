@@ -40,8 +40,23 @@ DETERMINISTIC = os.getenv("DETERMINISTIC", "1") == "1"
 USE_HALF = False if DETERMINISTIC else (os.getenv("USE_HALF", "1") == "1")
 # YOLOv8 Pose 모델 파일 경로
 MODEL_PATH = os.getenv("MODEL_PATH", "yolov8s-pose.pt")
+
+# ---------------------------------------------------------
+# 앞단 개선 (Day 7 측정, Day 8부터 기본 켜짐. 끄면 Day 7 이전 동작)
+# 채택 기준 (측정 뒤 정한 사후 규칙): 5개 fold 모두 탐지율이 오르고 ADL 오탐률 증가가 0.05 이하
+# ---------------------------------------------------------
 # 회전 폴백: 사람을 놓친 프레임에서만 영상을 90/270도로 돌려 다시 검출 (누운 사람 검출용, 놓친 프레임에서만 추론 2회 추가)
-ROTATE_FALLBACK = os.getenv("ROTATE_FALLBACK", "0") == "1"
+ROTATE_FALLBACK = _env_flag("ROTATE_FALLBACK", True)
+# R1: 이 시간(초)보다 짧은 미검출에는 엔진 상태 유지 (0이면 기존: 한 프레임만 놓쳐도 초기화)
+LOST_GRACE_S = float(os.getenv("LOST_GRACE_S", "0.5"))
+# LEVEL1 뒤 래치: 알람 뒤 누운 채 abnormal_enter/exit가 반복 기록되는 것을 막음 (알림은 원래 안 나감).
+# 기본 꺼짐: 적대적 검증에서 의자에 앉았다 다시 넘어짐, 하체가 가려진 채 서 있다 넘어짐, 오래 비운 뒤 다른 사람의 낙상 등에서
+# 두 번째 알람을 놓치는 경우가 확인됨 (래치는 일어선 자세로만 풀리고 만료가 없음). 반복 기록보다 놓친 낙상의 비용이 커서 끔.
+POST_ALARM_LATCH = _env_flag("POST_ALARM_LATCH", False)
+# R2: 대상 전환 정책. multi = 후보가 2명 이상일 때만 전환 (1명이면 같은 사람), all = 기존 (IoU가 낮으면 항상 전환)
+TARGET_SWITCH_POLICY = os.getenv("TARGET_SWITCH_POLICY", "multi").strip().lower()
+if TARGET_SWITCH_POLICY not in ("all", "multi"):
+    raise ValueError(f"TARGET_SWITCH_POLICY must be 'all' or 'multi': {TARGET_SWITCH_POLICY!r}")
 
 # ---------------------------------------------------------
 # 장치 식별 및 네트워크 설정
@@ -113,7 +128,7 @@ ABNORMAL_TIMEOUT_S = float(os.getenv("ABNORMAL_TIMEOUT_S", "10.0"))
 AI_MODE = os.getenv("AI_MODE", "veto").strip().lower()
 # 분류기 가중치 경로 (비우면 app/ai_classifier/weights/ 아래 기본 파일 탐색)
 AI_MODEL_PATH = os.getenv("AI_MODEL_PATH", "").strip()
-# p_fall이 이 값 이하일 때만 억제 (0.4 = 기존 'ADL & conf>=0.6' 조건과 동치)
+# p_fall이 이 값 미만일 때만 억제 (경계값은 알람 쪽). 0 이하면 억제하지 않음 (veto 끄기)
 AI_SUPPRESS_PFALL_TH = float(os.getenv("AI_SUPPRESS_PFALL_TH", "0.4"))
 # AI 억제 후에도 붕괴 상태가 이 시간 이상 이어지면 AI와 무관하게 알람 승격
 AI_ESCALATE_S = float(os.getenv("AI_ESCALATE_S", "60.0"))

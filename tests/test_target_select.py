@@ -69,6 +69,45 @@ class SelectTargetTest(unittest.TestCase):
         self.assertEqual(select_target_index(boxes, [0.9], last_bbox=[8, 8, 30, 30]), (0, True))
 
 
+class SwitchPolicyTest(unittest.TestCase):
+    """R2: multi 정책은 후보가 1명이면 교체로 보지 않음 (인덱스는 all과 같음)"""
+
+    def test_single_candidate_not_a_switch_with_multi(self):
+        boxes = [[0, 0, 10, 10]]
+        self.assertEqual(select_target_index(boxes, [0.9], [8, 8, 30, 30], policy="all"), (0, True))
+        self.assertEqual(select_target_index(boxes, [0.9], [8, 8, 30, 30], policy="multi"), (0, False))
+
+    def test_two_candidates_still_switch_with_multi(self):
+        boxes = [[0, 0, 10, 10], [50, 50, 60, 60]]
+        self.assertEqual(select_target_index(boxes, [0.6, 0.9], [200, 200, 210, 210], policy="multi"), (1, True))
+
+    def test_default_is_all(self):
+        boxes = [[0, 0, 10, 10]]
+        self.assertEqual(select_target_index(boxes, [0.9], [8, 8, 30, 30]),
+                         select_target_index(boxes, [0.9], [8, 8, 30, 30], policy="all"))
+
+    def test_multi_matches_offline_policy(self):
+        # 오프라인 재생(replay.effective_switched): switched_all & (n_cand >= 2) 와 같아야 함
+        import random
+        rng = random.Random(7)
+        for _ in range(2000):
+            n = rng.randint(0, 4)
+            boxes = []
+            for _ in range(n):
+                x, y = rng.uniform(0, 100), rng.uniform(0, 100)
+                boxes.append([x, y, x + rng.uniform(1, 50), y + rng.uniform(1, 50)])
+            confs = [rng.random() for _ in range(n)]
+            last = None if rng.random() < 0.2 else [rng.uniform(0, 100)] * 2 + [rng.uniform(100, 150)] * 2
+            i_all, sw_all = select_target_index(boxes, confs, last)
+            i_m, sw_m = select_target_index(boxes, confs, last, policy="multi")
+            self.assertEqual(i_m, i_all)
+            self.assertEqual(sw_m, sw_all and n >= 2)
+
+    def test_unknown_policy_raises(self):
+        with self.assertRaises(ValueError):
+            select_target_index([[0, 0, 1, 1]], [0.9], None, policy="any")
+
+
 LIVE_PARITY_SCRIPT = textwrap.dedent(
     """
     import random, sys
@@ -139,13 +178,16 @@ LIVE_PARITY_SCRIPT = textwrap.dedent(
             last = np.array([0, 0, 10, 10], dtype=np.float32)
         thr = rng.choice([0.3, 0.0, 0.5, 0.9])
         r1, s1 = original(Results(xyxy, cf), last, thr)
-        r2, s2 = live.select_best_person(Results(xyxy, cf), last_bbox=last, iou_thresh=thr)
+        r2, s2 = live.select_best_person(Results(xyxy, cf), last_bbox=last, iou_thresh=thr, policy="all")
         same = (s1 == s2 and len(r1.boxes) == len(r2.boxes)
                 and torch.equal(r1.boxes.xyxy, r2.boxes.xyxy) and torch.equal(r1.keypoints, r2.keypoints))
+        # multi 정책: 고르는 사람은 같고, 후보가 1명이면 교체 표시만 꺼짐
+        r3, s3 = live.select_best_person(Results(xyxy, cf), last_bbox=last, iou_thresh=thr, policy="multi")
+        same = same and s3 == (s1 and n >= 2) and torch.equal(r1.boxes.xyxy, r3.boxes.xyxy)
         if not same:
             bad += 1
             if bad < 5:
-                print("mismatch", case, boxes, conf, last, thr, s1, s2)
+                print("mismatch", case, boxes, conf, last, thr, s1, s2, s3)
     print("mismatches", bad)
     sys.exit(1 if bad else 0)
     """

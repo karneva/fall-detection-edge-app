@@ -21,13 +21,14 @@ FPS_LIST = (10.0, 15.0, 30.0)
 SEEDS = (0, 1)
 LIE_S = 90.0
 
-# 환경변수에 영향받지 않도록 AI 관련 기본값을 모두 고정
+# 환경변수에 영향받지 않도록 AI 관련 기본값과 짧은 미검출 유예(운영 기본값 0.5)를 고정
 BASE_PARAMS = dict(
     sustain_s=10.0,
     abnormal_timeout_s=10.0,
     ai_suppress_pfall_th=0.4,
     ai_escalate_s=60.0,
     ai_escalate_requires_drop=True,
+    lost_grace_s=0.5,
 )
 VARIANTS = {
     "off": ("off", lambda: CountingVerifier(0.9)),
