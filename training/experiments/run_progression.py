@@ -13,6 +13,8 @@
   python -m training.experiments.run_progression --stages L --folds 0-4 --seeds 3 --jobs 5
   python -m training.experiments.run_progression --stages G --folds 0-4 --seeds 3 --jobs 5   (GnfE0는 E0 모델 필요)
   python -m training.experiments.run_progression --summarize-only [--fa-ref E1max]
+  python -m training.experiments.run_progression --lodo --stages A,E,Es --folds 0-4 --seeds 3 --jobs 5 --out ...
+    (데이터셋 단위 일반화: fold k = 빼 둔 평가 데이터셋 k, folds.build_lodo_folds -> folds_lodo_v1.json)
 
 출력 (--out, 기본 dataset/_experiments/progression_v1/)
   fold{k}/{variant}.json : 변형(A, B, C, D, E0, E1, E2, E0max.., F0, F1, F2, E0p10.., Gmd..)별 fold 결과
@@ -66,6 +68,11 @@ G (이상 탐지, training/anomaly): Gmd (Mahalanobis), Gae (1D conv 오토인�
 
 시간 기준 지표 (replay.summarize): 제때 recall(엄격/느슨), 제때 balanced, 첫 LEVEL1이 정지 꼬리 안인지(in_tail).
   timing 필드가 없는 옛 결과 파일은 '-'로 표시합니다.
+
+LODO (--lodo): 평가 데이터셋 하나를 통째로 test로 두고 나머지 평가 데이터셋 + 학습 전용(figshare)으로 학습.
+  fold 번호는 folds.EVAL_DATASETS 순서(le2i=0, caucafall=1, gmdcsa24=2, mcfd=3, urfd=4), figshare는 fold -1이라 항상 학습.
+  학습 안 검증 분리, 표준화(mu/sd), 보정은 기존과 같이 학습 데이터셋에서만 계산. 'fold' 평균 ± 표준편차는
+  데이터셋 간 편차라 5-fold의 fold 편차와 뜻이 다름.
 
 이 모듈의 집계/표 함수는 표준 라이브러리만 씁니다 (numpy/torch는 fold 실행 함수 안에서 import).
 """
@@ -777,6 +784,13 @@ def render_markdown(summary: Dict[str, Any]) -> str:
         lines.append(f"- 평가: {meta.get('protocol', '')}")
         if meta.get("folds") is not None:
             lines.append(f"- folds: {meta.get('folds')}, seeds per NN stage: {meta.get('seeds')}")
+        lodo = meta.get("lodo")
+        if isinstance(lodo, dict) and lodo.get("held_out"):
+            held = sorted((int(k), d) for k, d in lodo["held_out"].items())
+            lines.append("- LODO (데이터셋 단위 일반화): fold = 빼 둔 데이터셋 ("
+                         + ", ".join(f"{k} {d}" for k, d in held) + "), 학습 전용 "
+                         + ", ".join(lodo.get("train_only") or []) + "은 모든 fold에서 학습에만 씀. "
+                         "fold 평균 ± 표준편차는 데이터셋 간 편차")
         fe = meta.get("frontend")
         if isinstance(fe, dict):
             lines.append(f"- 앞단: kp_dir {fe.get('kp_dir')}, switch_policy {fe.get('switch_policy')}, "
@@ -1992,6 +2006,8 @@ def _spawn_folds(args, fold_list: List[int], out_dir: Path) -> int:
                 cmd += ["--lost-grace", str(args.lost_grace)]
             if args.skip_existing:
                 cmd += ["--skip-existing"]
+            if args.lodo:
+                cmd += ["--lodo"]
             fh = open(log_dir / f"fold{k}.log", "a", encoding="utf-8")
             env = dict(os.environ, PYTHONIOENCODING="utf-8", OMP_NUM_THREADS=str(threads))
             running.append((k, subprocess.Popen(cmd, cwd=str(REPO_ROOT), stdout=fh, stderr=subprocess.STDOUT,
@@ -2009,6 +2025,24 @@ def _spawn_folds(args, fold_list: List[int], out_dir: Path) -> int:
             failed += int(rc != 0)
         running = still
     return failed
+
+
+def _ensure_lodo_folds(path: Path, manifest) -> Dict[str, int]:
+    """
+    LODO fold 파일을 manifest에서 만들어 저장하고 (없을 때), 있으면 지금 manifest로 만든 배정과 같은지 확인합니다.
+    fold 하위 프로세스를 띄우기 전에 부모가 한 번 만들어 둠 (동시 생성 방지).
+    """
+    from training.datasets.manifest import load_manifest
+    from training.experiments import folds as FO
+
+    folds = FO.build_lodo_folds(load_manifest(manifest))
+    if path.exists():
+        if FO.load_folds(path) != folds:
+            raise SystemExit(f"--lodo: {path}의 배정이 manifest로 만든 LODO 배정과 다릅니다")
+        return folds
+    FO.save_folds(path, folds, meta={"mode": "lodo", "held_out": FO.lodo_held_out(),
+                                     "train_only_fold": FO.TRAIN_ONLY_FOLD, "manifest": str(manifest)})
+    return folds
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -2038,6 +2072,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--lost-grace", type=float, default=None,
                     help="모든 재생(평가, 학습 창, 검증)의 짧은 미검출 유예 lost_grace_s (R1, 기본 0.0 고정. "
                          "R 단계 변형은 자체 값 0.5를 씀)")
+    ap.add_argument("--lodo", action="store_true",
+                    help="데이터셋 단위 일반화 (leave-one-dataset-out): fold k = 빼 둔 평가 데이터셋 k. "
+                         "--folds-file 기본값이 dataset/_experiments/folds_lodo_v1.json이 됨 (없으면 생성)")
     args = ap.parse_args(argv)
     if args.lost_grace is not None and args.lost_grace < 0:
         raise SystemExit("--lost-grace는 0 이상이어야 합니다")
@@ -2055,9 +2092,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "use_fallback": not args.no_fallback,
                          "lost_grace_s": 0.0 if args.lost_grace is None else float(args.lost_grace)}}
 
+    from training.experiments import folds as FO
+    if args.lodo:
+        held = FO.lodo_held_out()
+        bad = [k for k in fold_list if k not in held]
+        if bad:
+            raise SystemExit(f"--lodo: fold {bad} 없음 (0..{len(held) - 1})")
+        meta["lodo"] = {"held_out": held, "train_only": list(FO.TRAIN_ONLY_DATASETS)}
+
     if args.summarize_only:
         # 요약만 다시 만들 때는 실행 설정(단계, seed, epoch)이 이번 명령의 기본값일 뿐이라 기록하지 않음
-        summarize_out(out_dir, {"fa_ref": args.fa_ref}, fa_ref=args.fa_ref)
+        summarize_out(out_dir, {"fa_ref": args.fa_ref, **({"lodo": meta["lodo"]} if args.lodo else {})},
+                      fa_ref=args.fa_ref)
         _log(f"summary written to {out_dir}")
         return 0
     from training.experiments import replay as _R0
@@ -2068,9 +2114,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     logging.basicConfig(level=logging.WARNING)
     logging.getLogger("app").setLevel(logging.WARNING)
 
-    from training.experiments import folds as FO
     if args.folds_file is None:
-        args.folds_file = str(FO.DEFAULT_FOLDS_PATH)
+        args.folds_file = str(FO.LODO_FOLDS_PATH if args.lodo else FO.DEFAULT_FOLDS_PATH)
+    if args.lodo:
+        _ensure_lodo_folds(Path(args.folds_file), args.manifest)
+        meta["lodo"]["folds_file"] = str(args.folds_file)
 
     t_all = time.time()
     if args.jobs > 1 and len(fold_list) > 1:

@@ -185,7 +185,7 @@ class SpawnArgsTest(unittest.TestCase):
 
         base = dict(stages_list=["A"], seeds=1, device="cpu", f_margin=0.05, hgb_iter=5, manifest="m.jsonl",
                     folds_file="f.json", epochs=None, kp_dir=None, switch_policy="all", no_fallback=False,
-                    lost_grace=None, skip_existing=False, jobs=2)
+                    lost_grace=None, skip_existing=False, jobs=2, lodo=False)
         base.update(kw)
         with tempfile.TemporaryDirectory() as td,                 mock.patch.object(RP.subprocess, "Popen", _P), mock.patch.object(RP.time, "sleep", lambda s: None),                 mock.patch.object(RP, "_log", lambda m: None):
             failed = RP._spawn_folds(argparse.Namespace(**base), [0, 1], Path(td))
@@ -205,6 +205,12 @@ class SpawnArgsTest(unittest.TestCase):
             self.assertEqual(float(cmd[i + 1]), 0.5)
             self.assertEqual(cmd[cmd.index("--switch-policy") + 1], "multi")
             self.assertIn("--no-fallback", cmd)
+
+    def test_lodo_flag_passed(self):
+        for cmd in self._cmds():
+            self.assertNotIn("--lodo", cmd)
+        for cmd in self._cmds(lodo=True):
+            self.assertIn("--lodo", cmd)
 
     def test_markdown_shows_frontend(self):
         md = RP.render_markdown({"meta": {"protocol": "p", "frontend": {"kp_dir": "kp", "switch_policy": "multi",

@@ -6,6 +6,9 @@
   평가(test)에는 쓰지 않습니다 (클립 단위 폴더 라벨, 약 1.9초 클립).
 - sklearn StratifiedGroupKFold(n_folds, shuffle=True, random_state=seed). 저장: dataset/_experiments/folds_v1.json
 - 학습 fold 안의 검증 분리(split_train_val)는 그룹 단위, (dataset, label) 층별로 frac만큼 (표준 라이브러리 난수)
+- 데이터셋 단위 일반화(LODO, leave-one-dataset-out): build_lodo_folds. 평가 데이터셋 하나가 fold 하나
+  (EVAL_DATASETS 순서: le2i=0, caucafall=1, gmdcsa24=2, mcfd=3, urfd=4), 학습 전용 데이터는 fold TRAIN_ONLY_FOLD(-1)라
+  어떤 fold에서도 test가 되지 않고 항상 학습에 들어감. 저장: dataset/_experiments/folds_lodo_v1.json
 """
 import json
 import random
@@ -19,12 +22,16 @@ EVAL_DATASETS = ("le2i", "caucafall", "gmdcsa24", "mcfd", "urfd")
 TRAIN_ONLY_DATASETS = ("figshare_ursul29",)
 FOLDS_VERSION = 1
 DEFAULT_FOLDS_PATH = Path(__file__).resolve().parents[2] / "dataset" / "_experiments" / "folds_v1.json"
+LODO_FOLDS_PATH = DEFAULT_FOLDS_PATH.with_name("folds_lodo_v1.json")
+# LODO에서 학습 전용 데이터의 fold 번호. test fold(0..)와 겹치지 않아 split_fold에서 항상 train
+TRAIN_ONLY_FOLD = -1
 
 _SBJ_RE = re.compile(r"SBJ_(\d+)", re.IGNORECASE)
 
 __all__ = [
-    "EVAL_DATASETS", "TRAIN_ONLY_DATASETS", "DEFAULT_FOLDS_PATH",
-    "fold_group", "stratum", "build_folds", "save_folds", "load_folds", "split_fold", "split_train_val",
+    "EVAL_DATASETS", "TRAIN_ONLY_DATASETS", "DEFAULT_FOLDS_PATH", "LODO_FOLDS_PATH", "TRAIN_ONLY_FOLD",
+    "fold_group", "stratum", "build_folds", "build_lodo_folds", "lodo_held_out", "save_folds", "load_folds",
+    "split_fold", "split_train_val",
 ]
 
 
@@ -69,6 +76,31 @@ def build_folds(rows: Iterable[Dict[str, Any]], n_folds: int = 5, seed: int = 0)
     return folds
 
 
+def build_lodo_folds(rows: Iterable[Dict[str, Any]], eval_datasets: Iterable[str] = EVAL_DATASETS
+                     ) -> Dict[str, int]:
+    """
+    LODO fold 배정 {clip_id: fold}. 평가 데이터셋 eval_datasets[i]의 모든 클립은 fold i,
+    학습 전용 데이터(TRAIN_ONLY_DATASETS)는 TRAIN_ONLY_FOLD(-1). 그 밖의 데이터셋은 ValueError
+    (새 데이터셋이 조용히 학습 전용으로 들어가지 않도록). 난수가 없어 항상 같은 결과입니다.
+    """
+    order = {d: i for i, d in enumerate(eval_datasets)}
+    folds: Dict[str, int] = {}
+    for r in rows:
+        ds = r.get("dataset")
+        if ds in order:
+            folds[r["clip_id"]] = order[ds]
+        elif ds in TRAIN_ONLY_DATASETS:
+            folds[r["clip_id"]] = TRAIN_ONLY_FOLD
+        else:
+            raise ValueError(f"LODO: unknown dataset {ds!r} ({r.get('clip_id')})")
+    return dict(sorted(folds.items()))
+
+
+def lodo_held_out(eval_datasets: Iterable[str] = EVAL_DATASETS) -> Dict[int, str]:
+    """LODO fold 번호 -> 빼 둔(test) 데이터셋 이름"""
+    return {i: d for i, d in enumerate(eval_datasets)}
+
+
 def save_folds(path, folds: Dict[str, int], meta: Optional[Dict[str, Any]] = None) -> Path:
     """fold 배정을 JSON으로 저장합니다. {"version", "created_at", "meta", "folds": {clip_id: fold}}"""
     if isinstance(path, dict) and not isinstance(folds, dict):
@@ -101,6 +133,7 @@ def split_fold(rows: Iterable[Dict[str, Any]], folds: Dict[str, int], k: int,
     """
     fold k를 test로: (train 행 = fold != k 전체(학습 전용 포함), test 행 = fold == k 이면서 평가 데이터셋).
     fold 배정이 없는 행은 KeyError (manifest와 fold 파일 불일치를 조용히 넘기지 않음).
+    LODO 파일의 학습 전용 행(fold -1)은 k가 0 이상이면 항상 train.
     """
     eval_set = set(eval_datasets)
     train, test = [], []
