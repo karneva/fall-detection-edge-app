@@ -1,7 +1,11 @@
 """
-영상(mp4) 폴더 -> 30프레임 키포인트 시퀀스 배열 (액티브 러닝용 추가 데이터)
+영상(mp4) 폴더 -> 30프레임 키포인트 시퀀스 배열 (v1 액티브 러닝용 추가 데이터, 이전 경로)
 
-  python -m training.video_to_data --input-dir runs/clips/not_fall --label 0 --prefix not_fall
+  python -m training.video_to_data --input-dir <라벨이 확인된 영상 폴더> --label 0 --prefix custom_adl
+
+폴더 안 모든 영상에 같은 라벨을 붙이므로, 사람이 확인한 영상만 모은 폴더에 씁니다.
+runs/clips/not_fall은 AI가 억제한 사건(실제 낙상 포함 가능)이라 그대로 쓰면 안 됨: 현장 클립은
+training/review_queue.py로 검수하고 training.retrain_from_runs(v2)로 학습합니다.
 """
 import argparse
 import glob
@@ -20,7 +24,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.ai_classifier.features import normalize_frame_v1 as normalize_keypoints
-from training.paths import ACTIVE_DATA_DIR, RUNS_NOT_FALL_CLIPS, YOLO_POSE_MODEL
+from training.paths import ACTIVE_DATA_DIR, YOLO_POSE_MODEL
 
 # 설정
 MODEL_PATH = YOLO_POSE_MODEL
@@ -88,8 +92,9 @@ def save_samples(X, y, save_dir, prefix):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Extract pose sequences from videos into NumPy arrays")
-    parser.add_argument("--input-dir", default=str(RUNS_NOT_FALL_CLIPS), help="Folder containing source videos")
-    parser.add_argument("--label", type=int, default=0, help="Class label: 0=ADL, 1=Fall")
+    # 기본값 없음: 검수 전 runs/clips/not_fall 전체에 라벨 0이 붙는 일을 막음
+    parser.add_argument("--input-dir", required=True, help="Folder of human-verified source videos (one label)")
+    parser.add_argument("--label", type=int, required=True, choices=(0, 1), help="Class label: 0=ADL, 1=Fall")
     parser.add_argument("--prefix", default="not_fall", help="Output file prefix, e.g. not_fall or custom_fall")
     parser.add_argument("--save-dir", default=str(ACTIVE_DATA_DIR), help="Directory to save .npy arrays")
     parser.add_argument("--model-path", default=MODEL_PATH, help="YOLO pose model path")

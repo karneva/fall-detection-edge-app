@@ -10,7 +10,7 @@ ultralytics
 scipy
 pyzbar
 
-# 장치 컨테이너에서 python -m training.retrain_from_runs 실행 시 필요
+# 장치 컨테이너에서 python -m training.video_to_data (v1 추출) 실행 시 필요
 tqdm
 
 # 학습 머신용은 requirements-train.txt, 테스트는 requirements-dev.txt

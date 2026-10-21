@@ -8,10 +8,11 @@
    "segments": [{"cls": "fall", "start_s": 3.1, "end_s": 4.0}, ...],   # OmniFall 16클래스 이름
    "fall_start_s": 3.1 | null, "fall_end_s": 4.0 | null,              # 첫 번째 fall 구간
    "subject": "1", "cam": "1", "event_group": "...",  # 같은 사건의 모든 시점은 같은 event_group
-   "label_source": "omnifall" | "urfd_csv" | "folder", "license": "..."}
+   "label_source": "omnifall" | "urfd_csv" | "folder" | "review", "license": "..."}
 
 - segments가 비어 있으면 구간 라벨이 없는 클립 (폴더 단위 라벨, label_source "folder"만 fall 허용)
 - 분할(train/val/test)은 event_group 단위로 나눠야 다중 시점 누수가 생기지 않음
+- label_source "review": 현장 클립을 사람이 검수한 라벨 (training/review_queue.py export, dataset "field_runs")
 """
 import json
 import os
@@ -26,7 +27,7 @@ OMNIFALL_CLASSES = (
 )
 
 LABELS = ("fall", "adl")
-LABEL_SOURCES = ("omnifall", "urfd_csv", "folder")
+LABEL_SOURCES = ("omnifall", "urfd_csv", "folder", "review")
 FIELDS = ("clip_id", "dataset", "video", "label", "segments", "fall_start_s", "fall_end_s",
           "subject", "cam", "event_group", "label_source", "license")
 

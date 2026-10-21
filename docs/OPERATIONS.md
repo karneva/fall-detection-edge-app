@@ -135,11 +135,50 @@ docker-compose up -d --build
 - `runs/device_state.json`
 - `runs/*.jsonl`
 - `runs/clips/fall/*.mp4`
-- `runs/clips/not_fall/*.mp4` (AI가 억제한 사건, 검수 전에는 라벨 미확정)
+- `runs/clips/not_fall/*.mp4` (AI가 억제한 사건, 검수 전에는 라벨 미확정. 나중에 LEVEL1로 승격된 실제 낙상도 여기에 있음)
 - `runs/events/*.json` (낙상/억제 이벤트 sidecar: 판정 근거 키포인트, AI 입력, 파라미터. `SAVE_EVENT_SIDECAR=0`으로 끔)
+- `runs/review/labels.jsonl` (검수 라벨 기록, 아래 검수 큐)
 - `runs/eval/*.json` (`app.eval.replay_eval` 결과)
 
 공개 저장소에서는 이 파일들을 커밋하지 않는 것이 맞습니다.
+
+## 검수 큐
+
+`fall`/`not_fall` 폴더 이름은 엔진의 판정 결과일 뿐 정답 라벨이 아닙니다. 재학습에 쓰기 전에 사람이 클립을 보고
+라벨을 붙입니다 (`training/review_queue.py`, 표준 라이브러리만 사용, 장치나 학습 머신 어디서나 실행).
+
+```bash
+python -m training.review_queue list                    # 검수 전 항목, 우선순위 순
+python -m training.review_queue show <id>               # sidecar 경로, p_fall, 클립 안 ABNORMAL 진입 시각 등
+python -m training.review_queue label <id> fall --fall-start 4.2 --fall-end 5.0 --note "침대 옆 바닥"
+python -m training.review_queue label <id> not_fall
+python -m training.review_queue label <id> unsure
+python -m training.review_queue stats
+```
+
+- 항목 id는 sidecar 파일 이름(이벤트 시각과 종류)입니다. sidecar 없이 클립만 있으면 `clip_<폴더>_<클립 이름>`.
+- 우선순위 1은 AI 억제가 걸린 사건입니다: 억제 후 승격 기록이 없는 억제(`ai_suppressed`), 억제 뒤 승격된 사건의
+  억제 기록(`suppressed_escalated`)과 승격 알람(`escalated`). AI가 실제 낙상을 숨겼을 수 있는 곳이라 먼저 봅니다.
+  일반 알람(`level1`)은 2입니다.
+- 억제와 승격의 연결: 같은 사건이면 두 sidecar의 `snapshot.abnormal_start_ts`가 같습니다 (스냅샷이 없으면
+  승격 이벤트의 `ts - values.suppressed_for_s`가 억제 이벤트 `ts`와 같은지로 찾음). 억제 뒤 사람이 일어나
+  회복한 경우는 sidecar가 남지 않으므로, 승격 기록이 없는 억제가 "회복"인지 "장치가 꺼짐"인지는 구분하지 못합니다.
+- sidecar 없이 클립만 있으면(`SAVE_EVENT_SIDECAR=0`, sidecar 쓰기 실패) 연결은 클립 이름의 저장 시각으로 추정합니다.
+  `not_fall` 클립 저장 뒤 `AI_ESCALATE_S - 5`초에서 `AI_ESCALATE_S + 240`초 사이(기본 55~300초)에 저장된 `fall` 클립을
+  같은 사건으로 묶고 우선순위 1로 둡니다. 추정이라 다른 사건을 묶을 수 있는데, 그러면 아래 내보내기 규칙에 따라
+  한 행만 나가거나 둘 다 빠집니다. 승격이 이 범위 밖에서 났다면 묶이지 않아 같은 사건이 두 행으로 나갈 수 있으므로
+  sidecar는 켜 두는 것이 맞습니다.
+- 라벨은 클립과 따로 `runs/review/labels.jsonl`에 한 줄씩 덧붙이고, 같은 id는 마지막 줄이 이깁니다.
+  클립과 sidecar는 옮기거나 고치지 않습니다 (sidecar의 `review` 칸도 쓰지 않음).
+  마지막 줄이 줄바꿈 없이 끝나 있으면(편집기 저장, 쓰다 끊긴 기록) 줄을 바꾼 뒤 덧붙입니다.
+- 라벨 기록에 읽지 못한 줄(쓰다 끊긴 줄, 형식이 틀린 줄)이 있으면 `list`, `show`, `label`, `stats`는 경고만 하고
+  `export`와 `retrain_from_runs`는 줄 번호를 알려 주고 멈춥니다. 그 줄이 어떤 항목의 마지막 정정이었는지 알 수 없어
+  이전 라벨로 학습할 수 있기 때문입니다. 그 줄을 고치거나 지운 뒤 다시 실행합니다.
+- `fall`은 클립 시작부터의 낙상 구간(`--fall-start`, `--fall-end`, 초)이 있어야 학습에 들어갑니다.
+  `show`의 `entry_in_clip_s`(ABNORMAL 진입 시각, 보통 낙상 시작보다 1초쯤 늦음)를 참고해 클립에서 확인합니다.
+  구간 끝이 클립 길이(sidecar의 `t_end - t_start`)보다 1초 넘게 길면 기록하지 않습니다.
+- `unsure`와 미검수 항목은 학습에 쓰지 않습니다. 검수한 클립으로 다시 학습하는 절차(`python -m training.retrain_from_runs`)는
+  [EVALUATION_PROTOCOL](EVALUATION_PROTOCOL.md#현장-클립-검수와-재학습)에 있습니다.
 
 ## 토큰과 장치 상태
 

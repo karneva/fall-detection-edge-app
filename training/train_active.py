@@ -1,3 +1,12 @@
+"""
+v1 30프레임 분류기 액티브 러닝 재학습 (이전 경로, 런타임 기본 모델 아님)
+
+  python -m training.train_active
+
+app/ai_classifier/data의 v1 학습 배열과 active_learning/ 추가 배열(X_*.npy, y_*.npy)로 v1 모델을 미세조정합니다.
+결과는 dataset/_models/v1_active/fall_model_active_best.pth (런타임 weights/ 밖). 현장 클립 재학습은
+training.retrain_from_runs (검수 큐 -> v2)를 씁니다.
+"""
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,12 +23,16 @@ if __package__ in (None, ""):
 
 from app.ai_classifier.model import Fall1DCNN
 from app.ai_classifier.model_meta import current_git_sha, make_meta, write_meta
-from training.paths import ACTIVE_DATA_DIR, DATA_DIR, WEIGHTS_DIR
+from training.paths import ACTIVE_DATA_DIR, DATA_DIR, REPO_ROOT, WEIGHTS_DIR
 
 # 설정
 DATA_PATH = str(DATA_DIR)
 ACTIVE_DATA_PATH = str(ACTIVE_DATA_DIR)
-MODEL_SAVE_PATH = str(WEIGHTS_DIR)
+# 미세조정 시작점 (training/train.py가 저장한 v1 기본 모델)
+BASE_WEIGHTS_PATH = str(WEIGHTS_DIR)
+# v1 액티브 러닝 결과는 런타임 탐색 위치(weights/) 밖에 저장: weights/에 두면 배포 v2 가중치가 없는 장치에서
+# 런타임이 이 모델을 조용히 로드함 (weights_resolver 탐색 순서 4). 써 보려면 AI_MODEL_PATH로 지정
+MODEL_SAVE_PATH = str(REPO_ROOT / "dataset" / "_models" / "v1_active")
 
 BATCH_SIZE = 32
 LEARNING_RATE = 0.0005 # 데이터가 추가되었으므로 세밀한 학습을 위해 LR을 조금 낮춤
@@ -100,7 +113,7 @@ def train_active():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Fall1DCNN().to(device)
     
-    best_weights_path = os.path.join(MODEL_SAVE_PATH, "fall_model_best.pth")
+    best_weights_path = os.path.join(BASE_WEIGHTS_PATH, "fall_model_best.pth")
     if os.path.exists(best_weights_path):
         print("Loading existing best weights for fine-tuning...")
         model.load_state_dict(torch.load(best_weights_path, map_location=device))
@@ -159,7 +172,7 @@ def train_active():
             write_meta(os.path.join(MODEL_SAVE_PATH, "fall_model_active_best.pth"), meta)
             print(f"Saved Active Best Model (Acc: {val_acc:.2f}%)")
 
-    print("Active learning training finished.")
+    print(f"Active learning training finished. Saved under {MODEL_SAVE_PATH} (not loaded by the runtime unless AI_MODEL_PATH points to it)")
 
 if __name__ == "__main__":
     train_active()

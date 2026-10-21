@@ -120,6 +120,8 @@ manifest 한 줄 = 영상 하나:
 
 - 라벨: Le2i·CAUCAFall·GMDCSA24·MCFD는 OmniFall 16클래스 구간, URFD는 프레임 상태 CSV(0 → fall, 1 → lying),
   Figshare는 폴더(Fall/ADL) 단위
+- 현장 클립(`field_runs`, 선택): 검수 큐 export 행. `label_source` `review`, fall은 검수자가 적은 낙상 구간 하나,
+  `event_group`은 사건 단위 ([EVALUATION_PROTOCOL](EVALUATION_PROTOCOL.md#현장-클립-검수와-재학습)). 통합 manifest와는 따로 둠
 - `event_group`: 같은 사건의 다른 시점(MCFD 카메라 8대)과 바이트가 같은 중복 영상은 같은 그룹 → 분할 시 함께 이동
 - `crop_px`: URFD cam0 영상은 640x240 합성(왼쪽 깊이 | 오른쪽 RGB)이라 RGB 절반 `[320, 0, 640, 240]`만 사용
 

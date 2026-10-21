@@ -18,7 +18,7 @@ HAS_STACK = (importlib.util.find_spec("numpy") is not None and importlib.util.fi
 class ConstTest(unittest.TestCase):
     def test_frontend_defaults(self):
         self.assertEqual(TV.FRONTEND, {"lost_grace_s": 0.5, "switch_policy": "multi", "rotate_fallback": True,
-                                      "post_alarm_latch": True})
+                                      "post_alarm_latch": False})
         self.assertEqual((TV.FEATURE_VERSION, TV.META_ARCH, TV.MODE, TV.STEP_S, TV.THRESHOLD),
                          ("v2", "fall_cnn_gap", "max", 0.5, 0.4))
 

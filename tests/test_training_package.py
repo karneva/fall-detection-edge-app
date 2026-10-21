@@ -41,12 +41,16 @@ class TrainingPathsTest(unittest.TestCase):
 
 class TrainingCliTest(unittest.TestCase):
     def test_runs_by_module_and_by_file_path(self):
-        # retrain_from_runs는 표준 라이브러리만 import하므로 어디서나 --help 실행 가능해야 함
+        # retrain_from_runs, review_queue는 표준 라이브러리만 import하므로 어디서나 --help 실행 가능해야 함
+        proc = subprocess.run([sys.executable, "-m", "training.review_queue", "--help"], cwd=str(REPO_ROOT),
+                              capture_output=True, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-1000:])
         for cmd in (["-m", "training.retrain_from_runs", "--help"], ["training/retrain_from_runs.py", "--help"]):
             proc = subprocess.run([sys.executable, *cmd], cwd=str(REPO_ROOT),
                                   capture_output=True, text=True, timeout=60)
             self.assertEqual(proc.returncode, 0, (cmd, proc.stderr[-1000:]))
-            self.assertIn("--input-dir", proc.stdout)
+            self.assertIn("--runs-dir", proc.stdout)
+            self.assertIn("--input-dir", proc.stdout)  # 이전 옵션은 받되 이유를 출력하고 종료
 
 
 @unittest.skipUnless(HAS_TORCH, "torch/numpy not installed")
@@ -60,7 +64,7 @@ class TrainingImportTest(unittest.TestCase):
             for name in ("ultralytics", "tqdm", "cv2"):
                 sys.modules[name] = mock.MagicMock()
             for m in ("training.dataset_builder", "training.video_to_data", "training.train",
-                      "training.train_active", "training.retrain_from_runs"):
+                      "training.train_active", "training.retrain_from_runs", "training.review_queue"):
                 importlib.import_module(m)
             print(sorted(os.listdir(".")))
             """

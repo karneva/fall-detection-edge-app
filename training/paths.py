@@ -7,7 +7,7 @@
 import os
 from pathlib import Path
 
-from app.ai_classifier.weights_resolver import DEFAULT_WEIGHTS_DIR
+from app.ai_classifier.weights_resolver import DEFAULT_WEIGHTS_DIR, V2_EXTRA_DIRS, V2_WEIGHT_NAME
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,3 +26,20 @@ YOLO_POSE_MODEL = "yolov8s-pose.pt"
 
 # 운영 중 저장된 오탐 의심 클립
 RUNS_NOT_FALL_CLIPS = REPO_ROOT / "runs" / "clips" / "not_fall"
+
+# 운영 출력 폴더 (클립, 이벤트 sidecar)와 검수 라벨 기록 (training/review_queue.py)
+RUNS_DIR = REPO_ROOT / "runs"
+REVIEW_LABELS = RUNS_DIR / "review" / "labels.jsonl"
+
+
+def is_runtime_weights_path(path) -> bool:
+    """
+    런타임이 기본으로 찾는 가중치 위치인지 확인합니다 (weights_resolver 탐색 순서 3, 4).
+    런타임 weights/ 폴더 안의 파일, 또는 dataset/_models/의 배포 v2 파일명이면 True.
+    재학습 결과를 여기에 쓰면 검증 전에 배포 모델이 바뀌므로 후보 위치에 따로 저장해야 합니다.
+    """
+    p = os.path.normcase(str(Path(path).resolve()))
+    if os.path.normcase(str(Path(p).parent)) == os.path.normcase(str(Path(WEIGHTS_DIR).resolve())):
+        return True
+    v2 = {os.path.normcase(str((Path(d) / V2_WEIGHT_NAME).resolve())) for d in V2_EXTRA_DIRS}
+    return p in v2

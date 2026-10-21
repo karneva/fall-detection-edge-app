@@ -121,9 +121,40 @@ python -m app.eval.replay_eval --synthetic
   - 저자세 지속(`enter_reason=low_posture_sustained`)으로 진입했다면 저자세가 시작된 시각(`event_anchor_ts`)부터
 - AI가 판정할 때 실제로 본 30프레임(승격 이벤트에서도 억제 당시 입력), `p_fall`, 가중치 해시
 - 엔진 파라미터, 실측 FPS, 클립 경로
-- `review.human_label`: 검수 전 `pending` (Day 9 검수 큐에서 사용)
+- `review.human_label`: 검수 전 `pending`. 검수 큐는 이 칸을 고치지 않고 라벨을 `runs/review/labels.jsonl`에 따로 기록
 
-AI가 억제한 사건(`not_fall` 클립)도 검수 전에는 ADL로 단정하지 않습니다.
+AI가 억제한 사건(`not_fall` 클립)도 검수 전에는 ADL로 단정하지 않습니다. 억제 뒤 붕괴가 이어져 LEVEL1로
+승격된 실제 낙상도 억제 클립은 `not_fall`에 저장됩니다.
+
+### 현장 클립 검수와 재학습
+
+1. 검수: `python -m training.review_queue list`로 AI 억제 사건부터 보고 `label <id> fall|not_fall|unsure`
+   (사용법은 [OPERATIONS](OPERATIONS.md#검수-큐)). `fall`은 클립 기준 낙상 구간을 함께 적습니다.
+2. 내보내기: `python -m training.review_queue export --out dataset/_manifest/field_runs.jsonl`
+   - 검수된 `fall`(구간 있음)과 `not_fall`만 manifest 행이 됩니다 (`dataset` `field_runs`, `label` fall/adl,
+     `label_source` `review`). `unsure`, 미검수, 클립 없는 항목은 빠집니다.
+   - `event_group`은 사건 단위(`field_runs/<억제 기록 id>`)라 같은 사건의 억제 클립과 승격 클립이 분할에서 함께 움직입니다.
+     두 클립은 같은 사건 시점에서 시작해 겹치므로 더 긴 클립 하나만 내보내고, 두 라벨이 다르면 둘 다 빼고 알려 줍니다.
+     한 사건의 클립 중 하나라도 `unsure`이면 그 사건은 내보내지 않습니다 (억제 클립이 승격 클립 구간을 모두 담음).
+   - sidecar 없는 클립은 저장 시각으로 사건을 추정해 묶습니다 ([OPERATIONS](OPERATIONS.md#검수-큐)). 승격이 추정 범위
+     밖에서 났다면 같은 사건이 두 `event_group`으로 나뉘어 이 규칙이 지켜지지 않습니다.
+   - 라벨 기록에 읽지 못한 줄이 있으면 내보내지 않고 멈춥니다.
+   - `fps`는 넣지 않습니다. 클립 저장기가 실제 저장 fps를 영상 헤더에 쓰고 추출기가 그 값을 씁니다.
+3. 재학습: `python -m training.retrain_from_runs` (`--dry-run`으로 명령만 확인)
+   - 위 내보내기 -> `extract_keypoints --rotate-fallback`(기본 학습 키포인트 `v3_fb`와 같은 설정,
+     `dataset/_keypoints/field_v3_fb`) -> `train_v2 --extra-manifest`(공개 데이터 manifest + 현장 행)
+   - 결과는 후보 `dataset/_models/candidates/fall_cnn_gap_v2_field_<시각>.pt`에만 저장합니다. 배포 위치
+     (`app/ai_classifier/weights/`, `dataset/_models/fall_cnn_gap_v2.pt`)는 거부하므로 런타임이 로드하는 모델은 바뀌지 않습니다.
+   - 검수된 행이 하나도 없거나, 라벨 기록에 읽지 못한 줄이 있으면 실행하지 않습니다.
+   - 추출 뒤 키포인트가 없는 클립(영상이 깨짐, 낙상 구간이 클립 끝을 넘음 등, 이유는 `<field-kp-dir>/_extract_log.jsonl`)이
+     있으면 목록을 출력하고 학습 전에 멈춥니다. 그 클립 없이 학습하려면 `--allow-missing`.
+4. 채택: 후보를 기존 모델과 같은 평가 클립 재생과 위 회귀 기준으로 비교한 뒤 사람이 배포 위치로 옮깁니다
+   (장치에서 시험할 때는 `AI_MODEL_PATH`로 지정). `run_progression` 5-fold 추정은 공개 데이터 manifest만 쓰므로
+   현장 행의 효과는 이 수치에 나타나지 않습니다.
+
+이전의 `retrain_from_runs`(`runs/clips/not_fall` 전체를 검수 없이 라벨 0으로 v1 30프레임 모델 재학습)는 없앴습니다.
+`--input-dir` 등 이전 옵션을 주면 이유를 출력하고 종료합니다. v1 재학습 스크립트(`training.train_active`)는 결과를
+런타임 탐색 위치 밖(`dataset/_models/v1_active/`)에 저장합니다.
 
 ## 평가셋 구성 권장 시나리오
 

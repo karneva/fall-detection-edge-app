@@ -13,8 +13,15 @@ figshare)를 학습합니다. 판정은 E*max 방식 (ABNORMAL 진입부터 판�
 - 출력: <out> (torch.save {"arch": "E1", "state_dict", "mu", "sd"}, run_progression E1_s*.pt와 같은 형식,
   가중치는 CPU 텐서, mu/sd는 채널별 표준화 float32 배열)와 <out>.meta.json (app.ai_classifier.model_meta).
 
+- 추가 manifest (--extra-manifest, 예: 현장 검수 클립 training/review_queue.py export): 기본 manifest 행에 더해 학습.
+  키포인트는 --extra-kp-dir(기본 --kp-dir)에서 읽음. clip_id가 기본 manifest와 겹치면 거부.
+  추가 manifest를 쓰면 배포 가중치 위치(training.paths.is_runtime_weights_path)에는 저장하지 않음 (후보로 저장 후 평가).
+
 실행 (저장소 루트에서)
   python -m training.train_v2 --kp-dir dataset/_keypoints/v3_fb --out dataset/_models/fall_cnn_gap_v2.pt
+  python -m training.train_v2 --extra-manifest dataset/_manifest/field_runs.jsonl
+      --extra-kp-dir dataset/_keypoints/field_v3_fb --out dataset/_models/candidates/fall_cnn_gap_v2_field.pt
+  (현장 클립 재학습은 위 과정을 묶은 python -m training.retrain_from_runs 를 씀)
 """
 import argparse
 import json
@@ -40,11 +47,12 @@ STEP_S = 0.5
 THRESHOLD = 0.4
 VAL_FRAC = 0.15
 VAL_SPLIT_SEED = 0
-# 운영 기본 앞단 (Day 8 결정 1)
+# 운영 기본 앞단 (Day 8 결정 1). 알람 뒤 래치는 운영 기본값과 5-fold 평가(p8_full)처럼 끔
+# (배포 중인 fall_cnn_gap_v2는 래치를 켠 재생으로 학습했고 meta에 그대로 기록되어 있음)
 FRONTEND: Dict[str, Any] = {"lost_grace_s": 0.5, "switch_policy": "multi", "rotate_fallback": True,
-                            "post_alarm_latch": True}
+                            "post_alarm_latch": False}
 
-__all__ = ["FRONTEND", "train_v2", "build_meta", "main"]
+__all__ = ["FRONTEND", "train_v2", "build_meta", "merge_extra_rows", "main"]
 
 
 def _log(msg: str) -> None:
@@ -68,6 +76,23 @@ def build_meta(n_windows: Dict[str, Any], val: Dict[str, Any], trained_on: Seque
         standardize="per-channel mu/sd in checkpoint (mu, sd)",
         n_windows=n_windows, val=val, train=train, n_params=n_params,
     )
+
+
+def merge_extra_rows(rows: List[Dict[str, Any]], extra_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    기본 manifest 행에 추가 행을 붙입니다 (표준 라이브러리만 사용). 추가 행은 manifest 검증을 통과해야 하고
+    clip_id가 기본 행과 겹치면 안 됩니다 (겹치면 키포인트 폴더가 섞임). 문제가 있으면 ValueError.
+    """
+    from training.datasets.manifest import validate_rows
+
+    errors = validate_rows(extra_rows)
+    if errors:
+        raise ValueError("extra manifest: " + "; ".join(errors[:5]))
+    base_ids = {r["clip_id"] for r in rows}
+    dup = sorted(r["clip_id"] for r in extra_rows if r["clip_id"] in base_ids)
+    if dup:
+        raise ValueError(f"extra manifest clip_id already in base manifest: {dup[:5]}")
+    return list(rows) + list(extra_rows)
 
 
 def train_v2(rows: List[Dict[str, Any]], clips: Dict[str, Dict[str, Any]], out_path, seed: int = 0,
@@ -100,7 +125,7 @@ def train_v2(rows: List[Dict[str, Any]], clips: Dict[str, Dict[str, Any]], out_p
     saved = (R.SWITCH_POLICY, R.USE_FALLBACK)
     R.SWITCH_POLICY, R.USE_FALLBACK = str(fe["switch_policy"]), bool(fe["rotate_fallback"])
     try:
-        latch = bool(fe.get("post_alarm_latch", True))
+        latch = bool(fe.get("post_alarm_latch", False))
         p_off = R.study_params("off", lost_grace_s=float(fe["lost_grace_s"]), post_alarm_latch=latch)
         p_veto = R.study_params("veto", lost_grace_s=float(fe["lost_grace_s"]), ai_suppress_pfall_th=THRESHOLD,
                                 post_alarm_latch=latch)
@@ -177,7 +202,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--switch-policy", default=FRONTEND["switch_policy"], choices=("all", "multi"))
     ap.add_argument("--no-fallback", action="store_true", help="회전 폴백 프레임을 미검출로 재생")
     ap.add_argument("--no-event-val", action="store_true", help="검증 클립 재생 지표를 건너뜀")
+    ap.add_argument("--extra-manifest", default=None, help="기본 manifest에 더할 manifest (예: 현장 검수 클립)")
+    ap.add_argument("--extra-kp-dir", default=None, help="추가 manifest의 키포인트 폴더 (기본: --kp-dir)")
     args = ap.parse_args(argv)
+    out = Path(args.out)
+    if not out.is_absolute():
+        out = REPO_ROOT / out
+    if args.extra_manifest:
+        from training.paths import is_runtime_weights_path
+        if is_runtime_weights_path(out):
+            # 현장 데이터를 섞은 모델은 평가 전에 배포 위치를 덮어쓰지 않음
+            raise SystemExit(f"--extra-manifest 학습 결과를 배포 가중치 위치에 쓸 수 없습니다: {out} (--out으로 후보 경로 지정)")
 
     logging.basicConfig(level=logging.WARNING)
     logging.getLogger("app").setLevel(logging.WARNING)
@@ -192,17 +227,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     kp_dir = Path(args.kp_dir)
     if not kp_dir.is_absolute():
         kp_dir = REPO_ROOT / kp_dir
-    out = Path(args.out)
-    if not out.is_absolute():
-        out = REPO_ROOT / out
     rows = load_manifest(args.manifest)
     t0 = time.time()
     clips = W.load_clips(rows, kp_dir=kp_dir)
     _log(f"loaded {len(clips)}/{len(rows)} clips from {kp_dir} in {time.time() - t0:.0f}s")
+    keypoints = kp_dir.name
+    if args.extra_manifest:
+        extra = load_manifest(args.extra_manifest)
+        rows = merge_extra_rows(rows, extra)
+        ex_kp = Path(args.extra_kp_dir) if args.extra_kp_dir else kp_dir
+        if not ex_kp.is_absolute():
+            ex_kp = REPO_ROOT / ex_kp
+        ex_clips = W.load_clips(extra, kp_dir=ex_kp)
+        clips.update(ex_clips)
+        if ex_kp != kp_dir:
+            keypoints = f"{kp_dir.name}+{ex_kp.name}"
+        _log(f"extra {len(ex_clips)}/{len(extra)} clips from {args.extra_manifest} ({ex_kp})")
     fe = {"lost_grace_s": float(args.lost_grace), "switch_policy": args.switch_policy,
           "rotate_fallback": not args.no_fallback, "post_alarm_latch": FRONTEND["post_alarm_latch"]}
     train_v2(rows, clips, out, seed=args.seed, device=None if args.device == "auto" else args.device,
-             epochs=args.epochs, frontend=fe, keypoints=kp_dir.name, event_val=not args.no_event_val,
+             epochs=args.epochs, frontend=fe, keypoints=keypoints, event_val=not args.no_event_val,
              git_sha=current_git_sha())
     return 0
 
