@@ -235,6 +235,18 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
   (13.8 → 5.5 ms) 출력은 같은 입력 기준 OKS 0.999로 거의 같았습니다. INT8과 yolov8n은 누운 사람 검출이 떨어졌습니다.
 - 알람 뒤 같은 사람의 반복 기록을 막는 장치(래치)는 두 번째 낙상을 놓치는 경우가 검증에서 확인되어 기본으로 껐습니다.
 
+### 처음 보는 데이터셋에서 (leave-one-dataset-out)
+
+데이터셋 하나를 분류기 학습에서 통째로 빼고 그 데이터셋으로 평가했습니다.
+
+| 배포 분류기 (E1max) | 탐지율 | ADL 오탐률 | Balanced |
+| --- | --- | --- | --- |
+| 같은 데이터셋의 다른 사건을 학습 (5-fold) | 0.792 | 0.110 | 0.838 |
+| 그 데이터셋을 학습에서 뺌 | 0.791 | 0.135 | 0.826 |
+
+- 탐지율은 그대로이고 오탐이 조금 늘었습니다 (ADL 240개 중 26 → 32개).
+- 앞단과 규칙은 모든 데이터셋을 보고 정했으므로, 새 현장에서는 이보다 나쁠 수 있습니다. 현장 클립은 검수 큐에서 라벨을 붙여 재학습에 씁니다.
+
 자세한 프로토콜과 주의점은 [MODEL_STUDY](docs/MODEL_STUDY.md), 원인 분석은 [FAILURE_ANALYSIS](docs/FAILURE_ANALYSIS.md)에 있습니다.
 
 ## 평가와 테스트
@@ -276,7 +288,9 @@ AI 실패 시 알람이 유지되는지 확인하는 **fail-open 테스트**가 
   - 라벨: OmniFall 구간 라벨과 URFD 프레임 라벨을 통합
   - 키포인트: 운영과 같은 YOLOv8-Pose와 대상 선택 규칙으로 추출
 - 데이터셋별 구성과 품질은 [DATA_CARD](docs/DATA_CARD.md), 수집 경위와 라이선스는 [DATASETS](docs/DATASETS.md)에 있습니다.
-- AI가 일상 동작으로 판단한 사건은 `runs/clips/not_fall/`과 `runs/events/`에 쌓여 재학습 재료가 됩니다.
+- 현장 사건은 `runs/clips/`와 `runs/events/`에 쌓입니다. AI가 억제한 사건(`not_fall`)에도 실제 낙상이 있을 수 있어,
+  검수 큐(`training/review_queue.py`)에서 사람이 라벨을 붙인 클립만 재학습에 씁니다
+  ([OPERATIONS](docs/OPERATIONS.md#검수-큐), [EVALUATION_PROTOCOL](docs/EVALUATION_PROTOCOL.md#현장-클립-검수와-재학습)).
 
 ```bash
 pip install -r requirements-train.txt     # + CUDA에 맞는 torch (GPU 학습 머신)
@@ -284,7 +298,8 @@ python -m training.datasets.fetch_public download omnifall_labels le2i caucafall
 python -m training.datasets.build_manifest --out dataset/_manifest/manifest_v1.jsonl
 python -m training.datasets.extract_keypoints --manifest dataset/_manifest/manifest_v1.jsonl --device 0
 python -m training.datasets.data_card --out docs/DATA_CARD.md
-python -m training.retrain_from_runs      # 현장 클립으로 액티브 러닝 재학습
+python -m training.review_queue list      # 현장 클립 검수 (label <id> fall|not_fall|unsure)
+python -m training.retrain_from_runs      # 검수된 현장 클립을 더해 v2 분류기 재학습 (후보 가중치로만 저장)
 ```
 
 데이터 원본, 학습 배열, 가중치, TensorRT 엔진은 저장소에 포함하지 않습니다.
