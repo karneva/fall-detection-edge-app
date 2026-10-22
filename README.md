@@ -2,6 +2,7 @@
 
 **Jetson Orin Nano 위에서 카메라 한 대로 사람의 낙상을 실시간 감지하는 엣지 애플리케이션**
 
+[![tests](https://github.com/karneva/fall-detection-edge-app/actions/workflows/tests.yml/badge.svg)](https://github.com/karneva/fall-detection-edge-app/actions/workflows/tests.yml)
 ![Jetson Orin Nano](https://img.shields.io/badge/Jetson-Orin%20Nano-76B900?logo=nvidia&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-1D%20CNN-EE4C2C?logo=pytorch&logoColor=white)
@@ -44,6 +45,22 @@ flowchart LR
 | 1차 판단 | 하강 속도·자세 비율·어깨 하강·높이 붕괴를 조합해 낙상 의심 → 확정 | `app/core/level1.py` |
 | 2차 검증 | 낙상 진입부터 판정까지 4초 창(약 16개)을 1D CNN에 넣어 가장 높은 낙상 확률 `p_fall` 사용 | `app/ai_classifier/` |
 | 알림·기록 | RPI/서버 이벤트, 사고 전후 MP4 업로드, 판정 근거(sidecar) 저장 | `app/modes/live_mode.py` |
+
+## 데모
+
+![낙상 장면: 서 있음, 넘어지는 중, ABNORMAL 진입, 바닥에 누움, LEVEL1 알람](docs/assets/demo_fall_strip.jpg)
+
+공개 낙상 클립을 실험과 같은 재생(15Hz, 규칙 + AI 거부권)에 넣은 결과이고, 시각·상태·`p_fall`은 모두 재생이 낸 값입니다 (`p_fall`은 이 클립을 학습에 쓰지 않은 fold 모델).
+
+![회전 폴백: 원래 방향 0명, 90도 돌린 영상에서 검출, 원래 좌표로 복원](docs/assets/demo_rotation_fallback.jpg)
+
+누운 사람을 원래 방향에서 놓친 프레임에 포즈 모델을 다시 돌려, 회전 폴백이 사람을 되찾는 과정을 그대로 보인 그림입니다.
+
+AI가 일상 동작(바닥에 앉기)을 거부한 예와 시간축 그림은 [docs/assets](docs/assets/)에 있고, `python -m training.demo.render_demo`로 다시 만듭니다.
+
+이미지 출처: CAUCAFall (Eraso et al., Mendeley Data, [doi:10.17632/7w7fccy7ky.4](https://doi.org/10.17632/7w7fccy7ky.4)),
+GMDCSA24 (Alam et al., Zenodo, [doi:10.5281/zenodo.13354453](https://doi.org/10.5281/zenodo.13354453)), 둘 다
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). 크기를 줄이고 골격과 문구를 덧그렸습니다 ([자세히](docs/assets/ATTRIBUTION.md)).
 
 ## 동작 방식
 
@@ -322,7 +339,8 @@ python -m training.retrain_from_runs      # 검수된 현장 클립을 더해 v2
 │   └── eval/               #   오프라인 평가 도구
 ├── training/               # 학습·데이터 준비 (GPU 학습 머신)
 │   ├── datasets/           #   공개 데이터 다운로드, 통합 manifest, 키포인트 추출, 데이터 카드
-│   └── experiments/        #   5-fold 분할, 운영 동일 재생, 창 생성, 모델, 단계별 실험, 실패 분석
+│   ├── experiments/        #   5-fold 분할, 운영 동일 재생, 창 생성, 모델, 단계별 실험, 실패 분석
+│   └── demo/               #   README 데모 이미지 (실험 재생 결과로 그림)
 ├── scripts/jetson/         # TensorRT 변환, 벤치마크, IP 보고
 ├── eval/                   # 평가 baseline, 라벨/manifest 예시, 직접 확인 태그
 ├── tests/                  # 회귀 테스트
