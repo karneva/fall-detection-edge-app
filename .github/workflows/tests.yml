@@ -1,0 +1,57 @@
+# 테스트 자동 실행
+# - stdlib: 표준 라이브러리만으로 도는 안전 테스트 (룰 엔진, 상태 머신, golden trace 등).
+#   Jetson(JetPack 6)의 Python 3.10과 개발 머신의 3.13에서 모두 실행합니다.
+# - full: numpy, CPU torch, scikit-learn, opencv(headless), onnx/onnxruntime을 설치하고 pytest로 전체 실행.
+#   ultralytics(포즈 모델)와 CUDA가 필요한 테스트, gitignore된 데이터(dataset/, 가중치)가 필요한 테스트는
+#   skip됩니다 (skip 이유는 -rs 출력에 나옵니다).
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stdlib:
+    name: stdlib (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: unittest (추가 의존성 없음)
+        run: python -m unittest discover -s tests -t .
+
+  full:
+    name: full (numpy, torch CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: .github/workflows/tests.yml
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install numpy pytest scikit-learn opencv-python-headless onnx onnxruntime
+          python -m pip list
+      - name: pytest
+        run: python -m pytest tests -q -rs -p no:cacheprovider

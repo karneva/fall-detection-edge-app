@@ -456,7 +456,8 @@ Jetson을 더 이상 쓸 수 없어(2026-10-18) 최적화 측정은 노트북(RT
 ### 협업 방식 (Day 5부터 병행)
 
 - 기능 단위 브랜치와 PR. PR 설명에 변경 이유, 실험 수치, 검증 방법을 쓰고 리뷰 코멘트와 반영 내용을 남김
-- `.github/workflows/tests.yml`: 의존성 없는 테스트와 numpy/torch 테스트를 GitHub Actions에서 실행
+- `.github/workflows/tests.yml` (완료): 표준 라이브러리 테스트(Python 3.10, 3.13)와 numpy/CPU torch 전체 테스트를
+  GitHub Actions에서 실행. 데이터·가중치·ultralytics·CUDA가 필요한 테스트는 skip
 - [owner] push와 PR 생성
 
 ### 보류
